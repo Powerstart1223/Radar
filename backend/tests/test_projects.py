@@ -299,6 +299,90 @@ class ProjectServiceDeploymentTests(unittest.TestCase):
         self.assertEqual(result["deploy_id"], "old-2")
         mark_state.assert_called_once_with(7, provider="netlify", state="running")
 
+    def test_perform_netlify_restore_action_with_target_deploy(self) -> None:
+        self.settings = Settings(
+            app_name="Project Radar",
+            app_host="127.0.0.1",
+            app_port=8787,
+            base_dir=self.base_dir,
+            storage_dir=self.base_dir / "storage",
+            artifacts_dir=self.base_dir / "storage" / "artifacts",
+            logs_dir=self.base_dir / "storage" / "logs",
+            db_path=self.base_dir / "project_radar.db",
+            codex_sessions_root=self.base_dir / "codex",
+            openclaw_sessions_root=self.base_dir / "openclaw",
+            github_token="",
+            vercel_token="",
+            netlify_token="netlify-token",
+            render_token="",
+        )
+        self.service = ProjectService(self.db, self.settings)
+
+        with patch.object(
+            self.service,
+            "get_project",
+            return_value={"deployments": [{"provider": "netlify", "site_id": "site-123", "deploy_id": "current-1"}]},
+        ), patch.object(
+            self.service,
+            "_http_json",
+            side_effect=[
+                [
+                    {"id": "current-1", "state": "current"},
+                    {"id": "old-2", "state": "old"},
+                    {"id": "old-3", "state": "old"},
+                ],
+                {"id": "old-3"},
+            ],
+        ), patch.object(self.service, "_mark_deploy_state") as mark_state:
+            result = self.service.perform_deployment_action(
+                7,
+                "netlify",
+                "restore_previous_deploy",
+                {"deploy_id": "old-3"},
+            )
+
+        self.assertEqual(result["status"], "running")
+        self.assertEqual(result["deploy_id"], "old-3")
+        mark_state.assert_called_once_with(7, provider="netlify", state="running")
+
+    def test_list_netlify_deployment_history(self) -> None:
+        self.settings = Settings(
+            app_name="Project Radar",
+            app_host="127.0.0.1",
+            app_port=8787,
+            base_dir=self.base_dir,
+            storage_dir=self.base_dir / "storage",
+            artifacts_dir=self.base_dir / "storage" / "artifacts",
+            logs_dir=self.base_dir / "storage" / "logs",
+            db_path=self.base_dir / "project_radar.db",
+            codex_sessions_root=self.base_dir / "codex",
+            openclaw_sessions_root=self.base_dir / "openclaw",
+            github_token="",
+            vercel_token="",
+            netlify_token="netlify-token",
+            render_token="",
+        )
+        self.service = ProjectService(self.db, self.settings)
+
+        with patch.object(
+            self.service,
+            "get_project",
+            return_value={"deployments": [{"provider": "netlify", "site_id": "site-123", "deploy_id": "current-1"}]},
+        ), patch.object(
+            self.service,
+            "_http_json",
+            return_value=[
+                {"id": "current-1", "state": "current", "updated_at": "2026-04-26T22:00:00Z", "deploy_url": "https://current", "context": "production"},
+                {"id": "old-2", "state": "old", "updated_at": "2026-04-25T22:00:00Z", "deploy_url": "https://old", "context": "production"},
+            ],
+        ):
+            result = self.service.list_deployment_history(7, "netlify", limit=10)
+
+        self.assertEqual(result["provider"], "netlify")
+        self.assertEqual(len(result["items"]), 2)
+        self.assertTrue(result["items"][0]["is_current"])
+        self.assertEqual(result["items"][1]["actions"][0]["id"], "restore_previous_deploy")
+
 
 if __name__ == "__main__":
     unittest.main()

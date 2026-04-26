@@ -14,6 +14,7 @@ This current build includes:
 - deployment target detection for common providers, provider console links, and one-click deploy when a local provider CLI is available
 - live deployment status enrichment for Vercel, Netlify, and Render when `PROJECT_RADAR_VERCEL_TOKEN`, `PROJECT_RADAR_NETLIFY_TOKEN`, or `PROJECT_RADAR_RENDER_TOKEN` are set
 - provider-backed deployment actions for Render (`Deploy`) and Netlify (`Rollback`) when the corresponding API token and site metadata are available
+- on-demand deployment history drill-down for Vercel, Netlify, and Render, with targeted Netlify rollback from a selected deploy
 - portfolio operations board for runs and deployments across all projects
 - local HTML shell at `/`
 

@@ -306,6 +306,7 @@
     let skills = [];
     let operationsRuns = [];
     let operationsDeployments = [];
+    const deploymentHistoryCache = {};
 
     function safeEvidence(raw) {
       if (!raw) {
@@ -499,6 +500,50 @@
       `).join('');
     }
 
+    function deploymentHistoryKey(projectId, provider) {
+      return `${projectId}:${provider}`;
+    }
+
+    function renderDeploymentHistory(projectId, target) {
+      const provider = String(target.provider || '');
+      const cached = deploymentHistoryCache[deploymentHistoryKey(projectId, provider)];
+      if (!cached) {
+        return '';
+      }
+      if (cached.loading) {
+        return `<div class="item"><span class="meta">Loading deployment history...</span></div>`;
+      }
+      if (cached.error) {
+        return `<div class="item"><span class="meta">${safeText(cached.error)}</span></div>`;
+      }
+      const items = cached.items || [];
+      if (!items.length) {
+        return `<div class="item"><span class="meta">No deployment history available.</span></div>`;
+      }
+      return `
+        <div class="item">
+          <strong>History</strong>
+          ${items.map(entry => `
+            <div class="item">
+              <div class="item-header">
+                <div>
+                  <span class="meta">${safeText(entry.deploy_id, 'unknown deploy')}</span><br>
+                  <span class="meta">state ${safeText(entry.state || entry.raw_state || 'unknown')}</span><br>
+                  ${entry.updated_at ? `<span class="meta">updated ${safeText(entry.updated_at)}</span><br>` : ''}
+                  <span class="meta">${safeText(entry.summary, 'No summary')}</span>
+                  ${entry.url ? `<br><span class="meta">${safeText(entry.url)}</span>` : ''}
+                  ${entry.is_current ? `<br><span class="meta">current deployment</span>` : ''}
+                </div>
+                <div class="actions" style="margin-top:0">
+                  ${(entry.actions || []).map(action => `<button class="btn secondary" onclick="runDeploymentAction(${projectId}, '${escapeHtml(provider)}', '${escapeHtml(action.id)}', '${escapeHtml(entry.deploy_id || '')}')">${safeText(action.label)}</button>`).join('')}
+                </div>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      `;
+    }
+
     async function loadOperationsBoard() {
       const [runsResponse, deploymentsResponse] = await Promise.all([
         fetch('/api/runs'),
@@ -624,9 +669,11 @@
               <div class="actions" style="margin-top:0">
                 ${target.runnable ? `<button class="btn secondary" onclick="deployProject(${project.id})">Deploy</button>` : ''}
                 ${(target.actions || []).map(action => `<button class="btn secondary" onclick="runDeploymentAction(${project.id}, '${escapeHtml(target.provider)}', '${escapeHtml(action.id)}')">${safeText(action.label)}</button>`).join('')}
+                ${target.history_supported ? `<button class="btn secondary" onclick="loadDeploymentHistory(${project.id}, '${escapeHtml(target.provider)}')">History</button>` : ''}
                 ${target.management_url ? `<button class="btn secondary" onclick="openExternal('${escapeHtml(target.management_url)}')">Manage</button>` : ''}
               </div>
             </div>
+            ${renderDeploymentHistory(project.id, target)}
           </div>
         `)
         .join('');
@@ -880,13 +927,41 @@
       document.getElementById('status-json').textContent = JSON.stringify(data, null, 2);
     }
 
-    async function runDeploymentAction(projectId, provider, actionId) {
+    async function runDeploymentAction(projectId, provider, actionId, deployId = '') {
       const response = await fetch(`/api/projects/${projectId}/deployments/${encodeURIComponent(provider)}/actions/${encodeURIComponent(actionId)}`, {
-        method: 'POST'
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(deployId ? { deploy_id: deployId } : {})
       });
       const data = await response.json();
       await loadStatus();
       await loadProjectDetail(projectId);
+      if (deploymentHistoryCache[deploymentHistoryKey(projectId, provider)]) {
+        await loadDeploymentHistory(projectId, provider, false);
+      }
+      document.getElementById('status-json').textContent = JSON.stringify(data, null, 2);
+    }
+
+    async function loadDeploymentHistory(projectId, provider, rerender = true) {
+      const key = deploymentHistoryKey(projectId, provider);
+      deploymentHistoryCache[key] = { loading: true, items: [] };
+      if (rerender && selectedProjectId === projectId) {
+        await loadProjectDetail(projectId);
+      }
+      const response = await fetch(`/api/projects/${projectId}/deployments/${encodeURIComponent(provider)}/history`);
+      const data = await response.json();
+      if (response.ok) {
+        deploymentHistoryCache[key] = { loading: false, items: data.items || [] };
+      } else {
+        deploymentHistoryCache[key] = {
+          loading: false,
+          items: [],
+          error: data.detail || 'Unable to load deployment history.',
+        };
+      }
+      if (selectedProjectId === projectId) {
+        await loadProjectDetail(projectId);
+      }
       document.getElementById('status-json').textContent = JSON.stringify(data, null, 2);
     }
 

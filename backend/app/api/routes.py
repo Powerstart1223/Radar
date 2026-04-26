@@ -79,9 +79,20 @@ def build_router(
         return {"run_id": run_id, "status": "queued", "provider": payload["skill_name"].split(":", 1)[1]}
 
     @router.post("/api/projects/{project_id}/deployments/{provider}/actions/{action_id}")
-    def perform_deployment_action(project_id: int, provider: str, action_id: str) -> dict:
+    def perform_deployment_action(project_id: int, provider: str, action_id: str, payload: dict | None = None) -> dict:
         try:
-            return projects.perform_deployment_action(project_id, provider, action_id)
+            return projects.perform_deployment_action(project_id, provider, action_id, payload)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @router.get("/api/projects/{project_id}/deployments/{provider}/history")
+    def get_deployment_history(
+        project_id: int,
+        provider: str,
+        limit: int = Query(default=10, ge=1, le=50),
+    ) -> dict:
+        try:
+            return projects.list_deployment_history(project_id, provider, limit=limit)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 

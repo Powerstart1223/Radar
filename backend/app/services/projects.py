@@ -299,7 +299,7 @@ class ProjectService:
             "cwd": cwd,
         }
 
-    def perform_deployment_action(self, project_id: int, provider: str, action_id: str) -> dict:
+    def perform_deployment_action(self, project_id: int, provider: str, action_id: str, payload: dict | None = None) -> dict:
         project = self.get_project(project_id)
         if project is None:
             raise ValueError("Project not found")
@@ -319,8 +319,39 @@ class ProjectService:
         if normalized_provider == "render" and normalized_action == "trigger_api_deploy":
             return self._perform_render_trigger(project_id=project_id, deployment=deployment)
         if normalized_provider == "netlify" and normalized_action == "restore_previous_deploy":
-            return self._perform_netlify_restore(project_id=project_id, deployment=deployment)
+            target_deploy_id = ""
+            if payload and payload.get("deploy_id"):
+                target_deploy_id = str(payload["deploy_id"]).strip()
+            return self._perform_netlify_restore(
+                project_id=project_id,
+                deployment=deployment,
+                target_deploy_id=target_deploy_id or None,
+            )
         raise ValueError(f"Unsupported deployment action: {provider}/{action_id}")
+
+    def list_deployment_history(self, project_id: int, provider: str, *, limit: int = 10) -> dict:
+        project = self.get_project(project_id)
+        if project is None:
+            raise ValueError("Project not found")
+
+        deployment = next(
+            (
+                item for item in (project.get("deployments") or [])
+                if str(item.get("provider") or "").strip().lower() == provider.strip().lower()
+            ),
+            None,
+        )
+        if deployment is None:
+            raise ValueError(f"Deployment provider not found for project: {provider}")
+
+        normalized_provider = provider.strip().lower()
+        if normalized_provider == "netlify":
+            return {"provider": normalized_provider, "items": self._netlify_deployment_history(deployment, limit=limit)}
+        if normalized_provider == "render":
+            return {"provider": normalized_provider, "items": self._render_deployment_history(deployment, limit=limit)}
+        if normalized_provider == "vercel":
+            return {"provider": normalized_provider, "items": self._vercel_deployment_history(project, deployment, limit=limit)}
+        raise ValueError(f"Deployment history is not available for provider: {provider}")
 
     def sync_codex_activity(self) -> dict:
         return self._sync_agent_activity(source="codex", sessions_root=self.settings.codex_sessions_root, glob_pattern="*.jsonl")
@@ -799,6 +830,7 @@ class ProjectService:
             if live_data:
                 item.update({key: value for key, value in live_data.items() if value not in {None, ""}})
             item["actions"] = self._deployment_actions(item)
+            item["history_supported"] = self._supports_deployment_history(item)
             enriched.append(item)
         return enriched
 
@@ -1021,6 +1053,16 @@ class ProjectService:
             actions.append({"id": "restore_previous_deploy", "label": "Rollback"})
         return actions
 
+    def _supports_deployment_history(self, deployment: dict) -> bool:
+        provider = str(deployment.get("provider") or "").strip().lower()
+        if provider == "vercel":
+            return bool(self.settings.vercel_token)
+        if provider == "netlify":
+            return bool(self.settings.netlify_token and deployment.get("site_id"))
+        if provider == "render":
+            return bool(self.settings.render_token and deployment.get("service_id"))
+        return False
+
     def _perform_render_trigger(self, *, project_id: int, deployment: dict) -> dict:
         if not self.settings.render_token:
             raise ValueError("PROJECT_RADAR_RENDER_TOKEN is not configured")
@@ -1048,7 +1090,13 @@ class ProjectService:
             "deploy_id": deploy_id,
         }
 
-    def _perform_netlify_restore(self, *, project_id: int, deployment: dict) -> dict:
+    def _perform_netlify_restore(
+        self,
+        *,
+        project_id: int,
+        deployment: dict,
+        target_deploy_id: str | None = None,
+    ) -> dict:
         if not self.settings.netlify_token:
             raise ValueError("PROJECT_RADAR_NETLIFY_TOKEN is not configured")
         site_id = str(deployment.get("site_id") or "").strip()
@@ -1066,16 +1114,24 @@ class ProjectService:
         if not isinstance(payload, list) or not payload:
             raise ValueError("No Netlify deploy history is available for rollback")
 
-        rollback_target = next(
-            (
-                item for item in payload
-                if isinstance(item, dict)
-                and str(item.get("id") or "").strip()
-                and str(item.get("id") or "").strip() != current_deploy_id
-                and str(item.get("state") or "").strip().lower() in {"old", "ready", "current", "published"}
-            ),
-            None,
-        )
+        eligible_deploys = [
+            item
+            for item in payload
+            if isinstance(item, dict)
+            and str(item.get("id") or "").strip()
+            and str(item.get("id") or "").strip() != current_deploy_id
+            and str(item.get("state") or "").strip().lower() in {"old", "ready", "current", "published"}
+        ]
+        rollback_target = None
+        if target_deploy_id:
+            rollback_target = next(
+                (item for item in eligible_deploys if str(item.get("id") or "").strip() == target_deploy_id),
+                None,
+            )
+            if rollback_target is None:
+                raise ValueError("Selected Netlify deploy is not available for rollback")
+        else:
+            rollback_target = eligible_deploys[0] if eligible_deploys else None
         if rollback_target is None:
             raise ValueError("No previous Netlify deploy is available for rollback")
 
@@ -1101,6 +1157,132 @@ class ProjectService:
             "status": "running",
             "deploy_id": restored_id,
         }
+
+    def _netlify_deployment_history(self, deployment: dict, *, limit: int) -> list[dict]:
+        if not self.settings.netlify_token:
+            return []
+        site_id = str(deployment.get("site_id") or "").strip()
+        current_deploy_id = str(deployment.get("deploy_id") or "").strip()
+        if not site_id:
+            return []
+        payload = self._http_json(
+            url=f"https://api.netlify.com/api/v1/sites/{urllib.parse.quote(site_id, safe='')}/deploys",
+            headers={
+                "Authorization": f"Bearer {self.settings.netlify_token}",
+                "Accept": "application/json",
+            },
+        )
+        if not isinstance(payload, list):
+            return []
+        history = []
+        for item in payload[:limit]:
+            if not isinstance(item, dict):
+                continue
+            deploy_id = str(item.get("id") or "").strip()
+            raw_state = str(item.get("state") or "").strip()
+            history.append(
+                {
+                    "deploy_id": deploy_id,
+                    "state": self._normalize_deployment_state(provider="netlify", raw_state=raw_state),
+                    "raw_state": raw_state,
+                    "updated_at": str(item.get("updated_at") or item.get("created_at") or "").strip(),
+                    "url": str(item.get("deploy_url") or item.get("url") or "").strip(),
+                    "summary": str(item.get("context") or item.get("branch") or raw_state or "deploy").strip(),
+                    "is_current": deploy_id == current_deploy_id,
+                    "actions": (
+                        [{"id": "restore_previous_deploy", "label": "Rollback"}]
+                        if deploy_id and deploy_id != current_deploy_id and raw_state.lower() in {"old", "ready", "current", "published"}
+                        else []
+                    ),
+                }
+            )
+        return history
+
+    def _render_deployment_history(self, deployment: dict, *, limit: int) -> list[dict]:
+        if not self.settings.render_token:
+            return []
+        service_id = str(deployment.get("service_id") or "").strip()
+        current_deploy_id = str(deployment.get("deploy_id") or "").strip()
+        if not service_id:
+            return []
+        payload = self._http_json(
+            url=f"https://api.render.com/v1/services/{urllib.parse.quote(service_id, safe='')}/deploys",
+            headers={
+                "Authorization": f"Bearer {self.settings.render_token}",
+                "Accept": "application/json",
+            },
+        )
+        deploys = payload if isinstance(payload, list) else payload.get("deploys", [])
+        if not isinstance(deploys, list):
+            return []
+        history = []
+        for item in deploys[:limit]:
+            if not isinstance(item, dict):
+                continue
+            deploy_id = str(item.get("id") or "").strip()
+            raw_state = str(item.get("status") or item.get("state") or "").strip()
+            commit = item.get("commit") if isinstance(item.get("commit"), dict) else {}
+            history.append(
+                {
+                    "deploy_id": deploy_id,
+                    "state": self._normalize_deployment_state(provider="render", raw_state=raw_state),
+                    "raw_state": raw_state,
+                    "updated_at": str(item.get("updatedAt") or item.get("finishedAt") or item.get("createdAt") or "").strip(),
+                    "url": "",
+                    "summary": str(commit.get("message") or raw_state or "deploy").strip(),
+                    "is_current": deploy_id == current_deploy_id,
+                    "actions": [],
+                }
+            )
+        return history
+
+    def _vercel_deployment_history(self, project: dict, deployment: dict, *, limit: int) -> list[dict]:
+        if not self.settings.vercel_token:
+            return []
+        repo_path = Path(str(project.get("primary_local_path") or "")).expanduser()
+        config = self._read_json_file(repo_path / ".vercel" / "project.json")
+        project_id = str(config.get("projectId") or "").strip()
+        if not project_id:
+            return []
+        params = {
+            "projectId": project_id,
+            "limit": str(limit),
+            "target": str(deployment.get("environment") or "production"),
+        }
+        team_id = str(config.get("orgId") or "").strip()
+        if team_id:
+            params["teamId"] = team_id
+        payload = self._http_json(
+            url=f"https://api.vercel.com/v6/deployments?{urllib.parse.urlencode(params)}",
+            headers={
+                "Authorization": f"Bearer {self.settings.vercel_token}",
+                "Accept": "application/json",
+            },
+        )
+        deploys = payload.get("deployments") if isinstance(payload, dict) else None
+        if not isinstance(deploys, list):
+            return []
+        current_deploy_id = str(deployment.get("deploy_id") or "").strip()
+        history = []
+        for item in deploys[:limit]:
+            if not isinstance(item, dict):
+                continue
+            deploy_id = str(item.get("uid") or item.get("id") or "").strip()
+            raw_state = str(item.get("readyState") or item.get("state") or "").strip()
+            ready_url = str(item.get("url") or "").strip()
+            history.append(
+                {
+                    "deploy_id": deploy_id,
+                    "state": self._normalize_deployment_state(provider="vercel", raw_state=raw_state),
+                    "raw_state": raw_state,
+                    "updated_at": self._epoch_millis_to_iso(item.get("ready") or item.get("createdAt") or item.get("created")),
+                    "url": f"https://{ready_url}" if ready_url and not ready_url.startswith("http") else ready_url,
+                    "summary": str(item.get("checksConclusion") or item.get("target") or raw_state or "deploy").strip(),
+                    "is_current": deploy_id == current_deploy_id,
+                    "actions": [],
+                }
+            )
+        return history
 
     def _deployment_api_error_reason(self, *, provider: str, fallback_reason: str, error: str) -> str:
         prefix = f"Latest {provider} deployment metadata is unavailable"
