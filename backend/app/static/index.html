@@ -1,0 +1,800 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Project Radar</title>
+  <style>
+    :root {
+      --bg: #f3f0e8;
+      --panel: #fffdf8;
+      --ink: #181512;
+      --muted: #6f665d;
+      --line: #d8cec1;
+      --accent: #235c52;
+      --warn: #9f4d1d;
+    }
+    body {
+      margin: 0;
+      font-family: Georgia, "Iowan Old Style", serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at top left, #efe2ce 0, transparent 28%),
+        linear-gradient(180deg, #f7f2e8 0%, var(--bg) 100%);
+    }
+    .wrap {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 32px 20px 48px;
+    }
+    .hero, .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      box-shadow: 0 10px 30px rgba(40, 28, 18, 0.06);
+    }
+    .hero {
+      padding: 28px;
+      margin-bottom: 20px;
+    }
+    .eyebrow {
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 10px;
+    }
+    h1 {
+      margin: 0 0 10px;
+      font-size: 40px;
+      line-height: 1;
+    }
+    p {
+      color: var(--muted);
+      line-height: 1.5;
+      font-size: 16px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+      margin-bottom: 20px;
+    }
+    .card {
+      padding: 18px;
+    }
+    .label {
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
+    .value {
+      margin-top: 8px;
+      font-size: 26px;
+      font-weight: 700;
+    }
+    .panel {
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+    .panel h2 {
+      margin: 0 0 8px;
+      font-size: 22px;
+    }
+    .banner-stack {
+      display: grid;
+      gap: 10px;
+    }
+    .banner {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 14px;
+      background: #faf6ef;
+    }
+    .banner.high {
+      border-color: var(--warn);
+      background: #fff2ea;
+    }
+    .banner.medium {
+      border-color: var(--accent);
+      background: #eef7f4;
+    }
+    .btn {
+      border: 1px solid var(--accent);
+      background: var(--accent);
+      color: white;
+      border-radius: 999px;
+      padding: 10px 16px;
+      cursor: pointer;
+      font: inherit;
+    }
+    .btn.secondary {
+      background: transparent;
+      color: var(--accent);
+    }
+    .stack {
+      display: grid;
+      grid-template-columns: 1.1fr 0.9fr;
+      gap: 16px;
+      align-items: start;
+    }
+    .item {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 14px;
+      margin-bottom: 12px;
+      background: #faf6ef;
+    }
+    .item-header {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: flex-start;
+    }
+    .meta {
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.4;
+    }
+    .chips {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 10px;
+    }
+    .chip {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 4px 10px;
+      color: var(--muted);
+      font-size: 12px;
+      background: var(--panel);
+    }
+    .chip.high {
+      border-color: var(--warn);
+      color: var(--warn);
+    }
+    .chip.medium {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    .form-row {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 12px;
+    }
+    label {
+      display: block;
+      font-size: 13px;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+    select, input, textarea {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px 12px;
+      font: inherit;
+      color: var(--ink);
+      background: var(--panel);
+      box-sizing: border-box;
+    }
+    textarea {
+      min-height: 88px;
+      resize: vertical;
+    }
+    .actions {
+      display: flex;
+      gap: 10px;
+      margin-top: 12px;
+      flex-wrap: wrap;
+    }
+    pre {
+      white-space: pre-wrap;
+      word-break: break-word;
+      background: #f6efe5;
+      border-radius: 12px;
+      padding: 14px;
+      border: 1px solid var(--line);
+      min-height: 120px;
+    }
+    @media (max-width: 860px) {
+      .grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      .stack {
+        grid-template-columns: 1fr;
+      }
+      h1 {
+        font-size: 32px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <section class="hero">
+      <div class="eyebrow">Local Operator Portal</div>
+      <h1>Project Radar</h1>
+      <p>A standalone control plane for Codex and OpenClaw projects. This build now performs real discovery from local git repos plus Codex and OpenClaw session stores, then queues candidates for review.</p>
+      <button class="btn" id="run-discovery">Run Discovery</button>
+      <button class="btn secondary" id="refresh-repos">Refresh Repos</button>
+      <button class="btn secondary" id="sync-codex">Sync Codex</button>
+      <button class="btn secondary" id="sync-openclaw">Sync OpenClaw</button>
+      <button class="btn secondary" id="sync-github">Sync GitHub</button>
+      <button class="btn secondary" id="load-status">Refresh Status</button>
+    </section>
+
+    <section class="grid">
+      <div class="panel card"><div class="label">Projects</div><div class="value" id="projects">0</div></div>
+      <div class="panel card"><div class="label">Candidates</div><div class="value" id="candidates">0</div></div>
+      <div class="panel card"><div class="label">Runs</div><div class="value" id="runs">0</div></div>
+      <div class="panel card"><div class="label">Attention</div><div class="value" id="attention-count">0</div></div>
+    </section>
+
+    <section class="panel">
+      <h2>Status</h2>
+      <pre id="status-json">Loading...</pre>
+    </section>
+
+    <section class="panel">
+      <h2>Sync Banners</h2>
+      <p>Source-specific sync failures surface here first, so operators can see stale or broken monitors without reading raw JSON.</p>
+      <div id="sync-banners">Loading sync state...</div>
+    </section>
+
+    <section class="panel">
+      <h2>Attention Queue</h2>
+      <p>The highest-value issues across all projects, derived from repo freshness, local state, PR signals, and recent agent runs.</p>
+      <div id="attention-list">Loading attention...</div>
+    </section>
+
+    <section class="panel">
+      <h2>Global Activity Feed</h2>
+      <p>Recent cross-project Codex and OpenClaw activity captured from local session stores.</p>
+      <div id="activity-list">Loading activity...</div>
+    </section>
+
+    <section class="panel">
+      <h2>Discovery Review</h2>
+      <p>Pending candidates can be confirmed into canonical projects. This is the first review queue, not the final UI.</p>
+      <div id="candidate-list">Loading candidates...</div>
+    </section>
+
+    <section class="stack">
+      <div class="panel">
+        <h2>Projects</h2>
+        <p>Confirmed projects become separate operating lanes here. Select one to inspect its current repo state and discovery evidence.</p>
+        <div id="project-list">Loading projects...</div>
+      </div>
+
+      <div class="panel">
+        <h2>Project Detail</h2>
+        <div id="project-detail"><p>Select a project.</p></div>
+      </div>
+    </section>
+  </div>
+  <script>
+    let selectedProjectId = null;
+    let selectedLogRunId = null;
+    let skills = [];
+
+    function safeEvidence(raw) {
+      if (!raw) {
+        return '{}';
+      }
+      try {
+        return JSON.stringify(JSON.parse(raw), null, 2);
+      } catch (_error) {
+        return raw;
+      }
+    }
+
+    async function loadCandidates() {
+      const response = await fetch('/api/discovery/candidates');
+      const data = await response.json();
+      const pending = data.items.filter(item => item.review_status === 'pending');
+      const container = document.getElementById('candidate-list');
+      if (!pending.length) {
+        container.innerHTML = '<p>No pending candidates.</p>';
+        return;
+      }
+      container.innerHTML = pending.map(item => {
+        const evidence = safeEvidence(item.evidence_json);
+        return `
+          <div class="item">
+            <div class="item-header">
+              <div>
+                <strong>${item.display_name}</strong><br>
+                <span class="label">${item.source}</span><br>
+                <span style="color:var(--muted)">confidence ${item.confidence}</span>
+              </div>
+              <button class="btn secondary" onclick="confirmCandidate(${item.id})">Confirm</button>
+            </div>
+            <pre style="margin-top:10px; min-height:0">${evidence}</pre>
+          </div>
+        `;
+      }).join('');
+    }
+
+    async function loadAttention() {
+      const response = await fetch('/api/attention');
+      const data = await response.json();
+      const items = data.items || [];
+      const container = document.getElementById('attention-list');
+      if (!items.length) {
+        container.innerHTML = '<p>No active attention items.</p>';
+        return;
+      }
+      container.innerHTML = items.map(item => `
+        <div class="item">
+          <div class="item-header">
+            <div>
+              <strong>${item.display_name}</strong><br>
+              <span class="meta">${item.title}</span><br>
+              <span class="meta">${item.detail}</span>
+            </div>
+            <button class="btn secondary" onclick="selectProject(${item.project_id})">Open Project</button>
+          </div>
+          <div class="chips">
+            <span class="chip ${item.severity}">${item.severity}</span>
+            <span class="chip">${item.type}</span>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    async function loadActivity() {
+      const response = await fetch('/api/activity');
+      const data = await response.json();
+      const items = data.items || [];
+      const container = document.getElementById('activity-list');
+      if (!items.length) {
+        container.innerHTML = '<p>No recent cross-project activity recorded.</p>';
+        return;
+      }
+      container.innerHTML = items.map(item => `
+        <div class="item">
+          <div class="item-header">
+            <div>
+              <strong>${item.display_name || 'Unmatched project'}</strong><br>
+              <span class="meta">${item.source} - ${item.event_type}</span><br>
+              <span class="meta">${item.occurred_at}</span><br>
+              <span class="meta">${item.summary || 'No summary'}</span>
+            </div>
+            ${item.project_id ? `<button class="btn secondary" onclick="selectProject(${item.project_id})">Open Project</button>` : ''}
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function renderSyncBanners(syncState) {
+      const container = document.getElementById('sync-banners');
+      const issues = (syncState || [])
+        .filter(item => item.last_error_at)
+        .sort((left, right) => String(right.last_error_at || '').localeCompare(String(left.last_error_at || '')));
+      if (!issues.length) {
+        container.innerHTML = '<p>No active sync failures. All monitored sources are currently healthy.</p>';
+        return;
+      }
+      container.innerHTML = `<div class="banner-stack">${issues.map(item => {
+        const isDegraded = item.last_success_at && item.last_success_at < item.last_error_at;
+        const severity = isDegraded ? 'high' : 'medium';
+        const freshness = item.last_success_at
+          ? `Last success ${item.last_success_at}`
+          : 'No successful sync recorded yet';
+        return `
+          <div class="banner ${severity}">
+            <strong>${item.source} sync needs attention</strong><br>
+            <span class="meta">${item.last_error_summary || 'Unknown sync failure'}</span><br>
+            <span class="meta">Last error ${item.last_error_at}</span><br>
+            <span class="meta">${freshness}</span>
+          </div>
+        `;
+      }).join('')}</div>`;
+    }
+
+    async function loadProjects(preferredProjectId) {
+      const response = await fetch('/api/projects');
+      const data = await response.json();
+      const items = data.items || [];
+      const container = document.getElementById('project-list');
+      if (!items.length) {
+        container.innerHTML = '<p>No confirmed projects yet.</p>';
+        document.getElementById('project-detail').innerHTML = '<p>Select a project.</p>';
+        selectedProjectId = null;
+        return;
+      }
+
+      if (preferredProjectId) {
+        selectedProjectId = preferredProjectId;
+      }
+      if (!selectedProjectId || !items.some(item => item.id === selectedProjectId)) {
+        selectedProjectId = items[0].id;
+      }
+
+      container.innerHTML = items.map(item => `
+        <div class="item">
+          <div class="item-header">
+            <div>
+              <strong>${item.display_name}</strong><br>
+              <span class="meta">${item.primary_local_path || 'No local path yet'}</span>
+            </div>
+            <button class="btn ${selectedProjectId === item.id ? '' : 'secondary'}" onclick="selectProject(${item.id})">
+              ${selectedProjectId === item.id ? 'Selected' : 'Open'}
+            </button>
+          </div>
+          <div class="chips">
+            <span class="chip">status ${item.status}</span>
+            <span class="chip">branch ${item.branch || 'unknown'}</span>
+            <span class="chip">PR ${item.pr_state || 'unknown'}</span>
+            <span class="chip">checks ${item.checks_state || 'unknown'}</span>
+            ${item.attention_count ? `<span class="chip ${item.attention_severity}">${item.attention_severity} attention ${item.attention_count}</span>` : ''}
+          </div>
+        </div>
+      `).join('');
+
+      await loadProjectDetail(selectedProjectId);
+    }
+
+    async function loadProjectDetail(projectId) {
+      const response = await fetch(`/api/projects/${projectId}`);
+      const project = await response.json();
+      const aliases = (project.aliases || [])
+        .map(alias => `<span class="chip">${alias.alias_type}: ${alias.alias_value}</span>`)
+        .join('');
+      const attention = (project.attention || [])
+        .map(issue => `
+          <div class="item">
+            <strong>${issue.title}</strong><br>
+            <span class="meta">${issue.detail}</span>
+            <div class="chips">
+              <span class="chip ${issue.severity}">${issue.severity}</span>
+              <span class="chip">${issue.type}</span>
+            </div>
+          </div>
+        `)
+        .join('');
+      const related = (project.related_candidates || [])
+        .map(candidate => `
+          <div class="item">
+            <strong>${candidate.display_name}</strong><br>
+            <span class="meta">${candidate.source} - ${candidate.review_status} - confidence ${candidate.confidence}</span>
+          </div>
+        `)
+        .join('');
+
+      const snapshot = project.repo_snapshot
+        ? `
+          <div class="item">
+            <strong>Repo Snapshot</strong><br>
+            <div class="meta">Branch: ${project.repo_snapshot.branch || 'unknown'}</div>
+            <div class="meta">Last commit: ${project.repo_snapshot.last_commit_at || 'unknown'}</div>
+            <div class="meta">Remote: ${project.repo_snapshot.remote_name || 'unknown'}</div>
+            <div class="meta">Dirty: ${project.repo_snapshot.has_uncommitted_changes ? 'yes' : 'no'}</div>
+            <div class="meta">Synced: ${project.repo_snapshot.synced_at || 'unknown'}</div>
+          </div>
+        `
+        : '<p>No repo snapshot yet.</p>';
+      const runRows = (project.recent_runs || [])
+        .map(run => `
+          <div class="item">
+            <div class="item-header">
+              <div>
+                <strong>${run.agent_type}</strong> - ${run.skill_name}<br>
+                <span class="meta">${run.status} - ${run.started_at}</span><br>
+                <span class="meta">${run.cwd}</span><br>
+                <span class="meta">${run.output_summary || 'No summary yet'}</span><br>
+                <span class="meta">log ${run.log_path || 'n/a'}</span>
+              </div>
+              <div class="actions" style="margin-top:0">
+                <button class="btn secondary" onclick="viewRunLog(${run.id})">Log</button>
+                ${run.status === 'queued' || run.status === 'running' || run.status === 'cancelling'
+                  ? `<button class="btn secondary" onclick="cancelRun(${run.id}, ${project.id})">Cancel</button>`
+                  : ''}
+              </div>
+            </div>
+          </div>
+        `)
+        .join('');
+      const skillOptions = skills
+        .map(skill => `<option value="${skill.name}">${skill.name}</option>`)
+        .join('');
+      const defaultSkill = skills[0]?.name || 'office-hours';
+      const defaultCommand = buildDefaultCommand('codex', defaultSkill, project.primary_local_path || '');
+
+      document.getElementById('project-detail').innerHTML = `
+        <div class="item">
+          <strong>${project.display_name}</strong><br>
+          <div class="meta">Owner: ${project.owner || 'unknown'}</div>
+          <div class="meta">Status: ${project.status}</div>
+          <div class="meta">Path: ${project.primary_local_path || 'unknown'}</div>
+          <div class="meta">Remote: ${project.remote_url || 'unknown'}</div>
+          <div class="meta">Default branch: ${project.default_branch || 'unknown'}</div>
+        </div>
+        ${snapshot}
+        <div class="item">
+          <strong>Attention</strong>
+          ${attention || '<p>No active attention items for this project.</p>'}
+        </div>
+        <div class="item">
+          <strong>Aliases</strong>
+          <div class="chips">${aliases || '<span class="meta">No aliases yet.</span>'}</div>
+        </div>
+        <div class="item">
+          <strong>Agent Control</strong>
+          <div class="form-row">
+            <div>
+              <label for="agent-type">Agent</label>
+              <select id="agent-type" onchange="syncLaunchCommand()">
+                <option value="codex">codex</option>
+                <option value="openclaw">openclaw</option>
+              </select>
+            </div>
+            <div>
+              <label for="skill-name">Skill</label>
+              <select id="skill-name" onchange="syncLaunchCommand()">
+                ${skillOptions}
+              </select>
+            </div>
+          </div>
+          <div class="form-row" style="grid-template-columns: 1fr;">
+            <div>
+              <label for="run-cwd">Working Directory</label>
+              <input id="run-cwd" value="${escapeHtml(project.primary_local_path || '')}" onchange="syncLaunchCommand()">
+            </div>
+          </div>
+          <div class="form-row" style="grid-template-columns: 1fr;">
+            <div>
+              <label for="run-command">Command Preview</label>
+              <textarea id="run-command">${escapeHtml(defaultCommand)}</textarea>
+            </div>
+          </div>
+          <div class="actions">
+            <button class="btn" onclick="queueProjectRun(${project.id})">Queue Run</button>
+            <button class="btn secondary" onclick="refreshProjectRepo(${project.id})">Refresh Repo</button>
+            <button class="btn secondary" onclick="syncProjectGithub(${project.id})">Sync GitHub</button>
+            <button class="btn secondary" onclick="refreshProjectDetail()">Refresh Lane</button>
+          </div>
+        </div>
+        <div class="item">
+          <strong>Discovery Evidence</strong>
+          ${related || '<p>No linked candidates found.</p>'}
+        </div>
+        <div class="item">
+          <strong>Recent Agent Activity</strong>
+          ${(project.recent_events || []).map(event => `
+            <div class="item">
+              <strong>${event.source}</strong> - ${event.event_type}<br>
+              <span class="meta">${event.occurred_at}</span><br>
+              <span class="meta">${event.summary || 'No summary'}</span>
+            </div>
+          `).join('') || '<p>No recent agent activity recorded.</p>'}
+        </div>
+        <div class="item">
+          <strong>Recent Runs</strong>
+          ${runRows || '<p>No runs queued for this project yet.</p>'}
+        </div>
+        <div class="item">
+          <strong>Run Log</strong>
+          <pre id="run-log-viewer">${selectedLogRunId ? 'Loading log...' : 'Select a run log.'}</pre>
+        </div>
+      `;
+      document.getElementById('skill-name').value = defaultSkill;
+      if (selectedLogRunId && (project.recent_runs || []).some(run => run.id === selectedLogRunId)) {
+        await viewRunLog(selectedLogRunId);
+      } else {
+        selectedLogRunId = null;
+      }
+    }
+
+    async function selectProject(projectId) {
+      selectedProjectId = projectId;
+      await loadProjects(projectId);
+    }
+
+    function escapeHtml(value) {
+      return String(value || '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;');
+    }
+
+    function buildDefaultCommand(agentType, skillName, cwd) {
+      const prompt = `use gstack ${skillName} in this project and improve the highest-value next issue`;
+      if (agentType === 'openclaw') {
+        return `openclaw --cwd "${cwd}" "${prompt}"`;
+      }
+      return `codex --cwd "${cwd}" "${prompt}"`;
+    }
+
+    function syncLaunchCommand() {
+      const agent = document.getElementById('agent-type');
+      const skill = document.getElementById('skill-name');
+      const cwd = document.getElementById('run-cwd');
+      const command = document.getElementById('run-command');
+      if (!agent || !skill || !cwd || !command) {
+        return;
+      }
+      command.value = buildDefaultCommand(agent.value, skill.value, cwd.value);
+    }
+
+    async function queueProjectRun(projectId) {
+      const agent = document.getElementById('agent-type');
+      const skill = document.getElementById('skill-name');
+      const cwd = document.getElementById('run-cwd');
+      const command = document.getElementById('run-command');
+      const response = await fetch('/api/runs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project_id: projectId,
+          agent_type: agent.value,
+          skill_name: skill.value,
+          cwd: cwd.value,
+          command: command.value
+        })
+      });
+      const data = await response.json();
+      await loadStatus();
+      await loadProjectDetail(projectId);
+      document.getElementById('status-json').textContent = JSON.stringify(data, null, 2);
+    }
+
+    async function refreshProjectRepo(projectId) {
+      const response = await fetch(`/api/projects/${projectId}/refresh`, {
+        method: 'POST'
+      });
+      const data = await response.json();
+      await loadStatus();
+      await loadProjectDetail(projectId);
+      document.getElementById('status-json').textContent = JSON.stringify(data, null, 2);
+    }
+
+    async function refreshAllRepos() {
+      const response = await fetch('/api/projects/refresh', {
+        method: 'POST'
+      });
+      const data = await response.json();
+      await loadStatus();
+      document.getElementById('status-json').textContent = JSON.stringify(data, null, 2);
+    }
+
+    async function syncCodex() {
+      const response = await fetch('/api/sync/codex', {
+        method: 'POST'
+      });
+      const data = await response.json();
+      await loadStatus();
+      document.getElementById('status-json').textContent = JSON.stringify(data, null, 2);
+    }
+
+    async function syncOpenClaw() {
+      const response = await fetch('/api/sync/openclaw', {
+        method: 'POST'
+      });
+      const data = await response.json();
+      await loadStatus();
+      document.getElementById('status-json').textContent = JSON.stringify(data, null, 2);
+    }
+
+    async function syncGithub() {
+      const response = await fetch('/api/sync/github', {
+        method: 'POST'
+      });
+      const data = await response.json();
+      await loadStatus();
+      document.getElementById('status-json').textContent = JSON.stringify(data, null, 2);
+    }
+
+    async function syncProjectGithub(projectId) {
+      const response = await fetch(`/api/projects/${projectId}/sync/github`, {
+        method: 'POST'
+      });
+      const data = await response.json();
+      await loadStatus();
+      await loadProjectDetail(projectId);
+      document.getElementById('status-json').textContent = JSON.stringify(data, null, 2);
+    }
+
+    async function refreshProjectDetail() {
+      if (!selectedProjectId) {
+        return;
+      }
+      await loadStatus();
+      await loadProjectDetail(selectedProjectId);
+    }
+
+    async function cancelRun(runId, projectId) {
+      const response = await fetch(`/api/runs/${runId}/cancel`, {
+        method: 'POST'
+      });
+      const data = await response.json();
+      await loadStatus();
+      await loadProjectDetail(projectId);
+      if (selectedLogRunId === runId) {
+        await viewRunLog(runId);
+      }
+      document.getElementById('status-json').textContent = JSON.stringify(data, null, 2);
+    }
+
+    async function viewRunLog(runId) {
+      selectedLogRunId = runId;
+      const viewer = document.getElementById('run-log-viewer');
+      if (viewer) {
+        viewer.textContent = 'Loading log...';
+      }
+      const response = await fetch(`/api/runs/${runId}/log`);
+      const data = await response.json();
+      if (viewer) {
+        viewer.textContent = data.content || 'Log is empty.';
+      }
+      document.getElementById('status-json').textContent = JSON.stringify({
+        run_id: data.run_id,
+        status: data.status,
+        log_path: data.log_path
+      }, null, 2);
+    }
+
+    async function loadSkills() {
+      const response = await fetch('/api/skills');
+      const data = await response.json();
+      skills = data.items || [];
+    }
+
+    async function loadStatus() {
+      const response = await fetch('/api/status');
+      const data = await response.json();
+      document.getElementById('projects').textContent = data.projects;
+      document.getElementById('candidates').textContent = data.candidates;
+      document.getElementById('runs').textContent = data.runs;
+      document.getElementById('attention-count').textContent = data.attention_count;
+      document.getElementById('status-json').textContent = JSON.stringify(data, null, 2);
+      renderSyncBanners(data.sync_state || []);
+      await loadCandidates();
+      await loadAttention();
+      await loadActivity();
+      await loadProjects();
+    }
+
+    async function runDiscovery() {
+      const response = await fetch('/api/discovery/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ roots: ['C:\\Users\\SJK'] })
+      });
+      const data = await response.json();
+      await loadStatus();
+      document.getElementById('status-json').textContent = JSON.stringify(data, null, 2);
+    }
+
+    async function confirmCandidate(candidateId) {
+      const response = await fetch('/api/discovery/confirm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ candidate_id: candidateId, owner: 'local' })
+      });
+      const data = await response.json();
+      await loadStatus();
+      await loadProjects(data.project_id);
+      document.getElementById('status-json').textContent = JSON.stringify(data, null, 2);
+    }
+
+    document.getElementById('load-status').addEventListener('click', loadStatus);
+    document.getElementById('run-discovery').addEventListener('click', runDiscovery);
+    document.getElementById('refresh-repos').addEventListener('click', refreshAllRepos);
+    document.getElementById('sync-codex').addEventListener('click', syncCodex);
+    document.getElementById('sync-openclaw').addEventListener('click', syncOpenClaw);
+    document.getElementById('sync-github').addEventListener('click', syncGithub);
+    setInterval(() => {
+      if (selectedProjectId) {
+        loadProjectDetail(selectedProjectId);
+      }
+    }, 5000);
+    loadSkills().then(loadStatus);
+  </script>
+</body>
+</html>
