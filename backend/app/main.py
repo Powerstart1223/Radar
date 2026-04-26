@@ -47,9 +47,11 @@ def index() -> FileResponse:
 
 @app.on_event("startup")
 def startup() -> None:
+    projects.start_background_release_sync()
     runs.start()
 
 
 @app.on_event("shutdown")
 def shutdown() -> None:
     runs.stop()
+    projects.stop_background_release_sync()

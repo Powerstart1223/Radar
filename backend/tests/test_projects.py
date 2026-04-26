@@ -580,6 +580,14 @@ class ProjectServiceDeploymentTests(unittest.TestCase):
         self.assertEqual(result["releases"], 1)
         self.assertEqual(result["release_sync"]["status"], "live")
 
+    def test_background_release_sync_lifecycle(self) -> None:
+        self.service = ProjectService(self.db, self.settings)
+        with patch.object(self.service, "_background_release_sync_loop") as loop:
+            self.service.start_background_release_sync()
+            self.service.stop_background_release_sync()
+
+        loop.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

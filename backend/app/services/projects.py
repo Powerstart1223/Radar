@@ -6,6 +6,7 @@ import json
 import re
 import shutil
 import subprocess
+import threading
 import tomllib
 import urllib.error
 import urllib.parse
@@ -58,6 +59,8 @@ class ProjectService:
     def __init__(self, db: Database, settings: Settings):
         self.db = db
         self.settings = settings
+        self._release_sync_thread: threading.Thread | None = None
+        self._release_sync_stop = threading.Event()
 
     def list_projects(self) -> list[dict]:
         with self.db.connect() as conn:
@@ -290,6 +293,22 @@ class ProjectService:
             "releases": len(releases),
             "release_sync": self.release_sync_status(),
         }
+
+    def start_background_release_sync(self) -> None:
+        if self._release_sync_thread and self._release_sync_thread.is_alive():
+            return
+        self._release_sync_stop.clear()
+        self._release_sync_thread = threading.Thread(
+            target=self._background_release_sync_loop,
+            name="project-radar-release-sync",
+            daemon=True,
+        )
+        self._release_sync_thread.start()
+
+    def stop_background_release_sync(self) -> None:
+        self._release_sync_stop.set()
+        if self._release_sync_thread and self._release_sync_thread.is_alive():
+            self._release_sync_thread.join(timeout=2)
 
     def release_sync_status(self) -> dict:
         with self.db.connect() as conn:
@@ -1205,6 +1224,17 @@ class ProjectService:
             "next_due_at": next_due_at,
             "reason": reason,
         }
+
+    def _background_release_sync_loop(self) -> None:
+        # Run one sync immediately on startup, then continue on the normal interval.
+        while not self._release_sync_stop.is_set():
+            try:
+                self.sync_release_metadata()
+            except Exception as exc:
+                self._mark_sync_state("deploy", success=False, error_summary=f"background release sync failed: {exc}")
+            wait_seconds = max(30, RELEASE_SYNC_INTERVAL_MINUTES * 60)
+            if self._release_sync_stop.wait(wait_seconds):
+                return
 
     def _deployment_actions(self, deployment: dict) -> list[dict]:
         provider = str(deployment.get("provider") or "").strip().lower()
