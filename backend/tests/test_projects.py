@@ -382,6 +382,63 @@ class ProjectServiceDeploymentTests(unittest.TestCase):
         self.assertEqual(len(result["items"]), 2)
         self.assertTrue(result["items"][0]["is_current"])
         self.assertEqual(result["items"][1]["actions"][0]["id"], "restore_previous_deploy")
+        self.assertIn("safety_note", result["items"][1]["details"])
+
+    def test_list_vercel_deployment_history_includes_details(self) -> None:
+        repo = self.base_dir / "vercel-history"
+        (repo / ".vercel").mkdir(parents=True)
+        (repo / ".vercel" / "project.json").write_text(
+            '{"projectId":"prj_123","orgId":"team_456"}',
+            encoding="utf-8",
+        )
+        self.settings = Settings(
+            app_name="Project Radar",
+            app_host="127.0.0.1",
+            app_port=8787,
+            base_dir=self.base_dir,
+            storage_dir=self.base_dir / "storage",
+            artifacts_dir=self.base_dir / "storage" / "artifacts",
+            logs_dir=self.base_dir / "storage" / "logs",
+            db_path=self.base_dir / "project_radar.db",
+            codex_sessions_root=self.base_dir / "codex",
+            openclaw_sessions_root=self.base_dir / "openclaw",
+            github_token="",
+            vercel_token="vercel-token",
+            netlify_token="",
+            render_token="",
+        )
+        self.service = ProjectService(self.db, self.settings)
+
+        with patch.object(
+            self.service,
+            "get_project",
+            return_value={
+                "primary_local_path": str(repo),
+                "deployments": [{"provider": "vercel", "environment": "production", "deploy_id": "dep-current"}],
+            },
+        ), patch.object(
+            self.service,
+            "_http_json",
+            return_value={
+                "deployments": [
+                    {
+                        "uid": "dep-current",
+                        "readyState": "READY",
+                        "createdAt": 1714147200000,
+                        "ready": 1714147800000,
+                        "url": "radar.vercel.app",
+                        "checksConclusion": "succeeded",
+                        "target": "production",
+                        "inspectorUrl": "https://vercel.com/acme/radar/deployments/dep-current",
+                    }
+                ]
+            },
+        ):
+            result = self.service.list_deployment_history(9, "vercel", limit=10)
+
+        self.assertEqual(result["provider"], "vercel")
+        self.assertEqual(result["items"][0]["details"]["checks"], "succeeded")
+        self.assertIn("safety_note", result["items"][0]["details"])
 
 
 if __name__ == "__main__":

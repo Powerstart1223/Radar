@@ -86,6 +86,29 @@
       display: grid;
       gap: 10px;
     }
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(24, 21, 18, 0.7);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      z-index: 1000;
+    }
+    .modal-backdrop.open {
+      display: flex;
+    }
+    .modal-panel {
+      width: min(760px, 100%);
+      max-height: 80vh;
+      overflow: auto;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      box-shadow: 0 20px 50px rgba(40, 28, 18, 0.2);
+      padding: 20px;
+    }
     .banner {
       border: 1px solid var(--line);
       border-radius: 12px;
@@ -300,6 +323,18 @@
       </div>
     </section>
   </div>
+  <div id="release-modal" class="modal-backdrop" onclick="closeReleaseDetails(event)">
+    <div class="modal-panel" onclick="event.stopPropagation()">
+      <div class="item-header">
+        <div>
+          <h2 style="margin:0">Release Details</h2>
+          <span class="meta" id="release-modal-subtitle">Select a deployment history row.</span>
+        </div>
+        <button class="btn secondary" onclick="closeReleaseDetails()">Close</button>
+      </div>
+      <div id="release-modal-body" style="margin-top:16px"><p>No release selected.</p></div>
+    </div>
+  </div>
   <script>
     let selectedProjectId = null;
     let selectedLogRunId = null;
@@ -307,6 +342,7 @@
     let operationsRuns = [];
     let operationsDeployments = [];
     const deploymentHistoryCache = {};
+    let selectedReleaseDetails = null;
 
     function safeEvidence(raw) {
       if (!raw) {
@@ -535,6 +571,7 @@
                   ${entry.is_current ? `<br><span class="meta">current deployment</span>` : ''}
                 </div>
                 <div class="actions" style="margin-top:0">
+                  <button class="btn secondary" onclick="showReleaseDetails('${escapeHtml(provider)}', '${escapeHtml(entry.deploy_id || '')}', ${projectId})">Details</button>
                   ${(entry.actions || []).map(action => `<button class="btn secondary" onclick="runDeploymentAction(${projectId}, '${escapeHtml(provider)}', '${escapeHtml(action.id)}', '${escapeHtml(entry.deploy_id || '')}')">${safeText(action.label)}</button>`).join('')}
                 </div>
               </div>
@@ -542,6 +579,48 @@
           `).join('')}
         </div>
       `;
+    }
+
+    function showReleaseDetails(provider, deployId, projectId) {
+      const cached = deploymentHistoryCache[deploymentHistoryKey(projectId, provider)];
+      if (!cached || !cached.items) {
+        return;
+      }
+      const entry = (cached.items || []).find(item => String(item.deploy_id || '') === String(deployId || ''));
+      if (!entry) {
+        return;
+      }
+      selectedReleaseDetails = entry;
+      const subtitle = document.getElementById('release-modal-subtitle');
+      const body = document.getElementById('release-modal-body');
+      const modal = document.getElementById('release-modal');
+      if (!subtitle || !body || !modal) {
+        return;
+      }
+      subtitle.textContent = `${provider} ${deployId}`;
+      const details = entry.details || {};
+      const rows = Object.entries(details)
+        .filter(([, value]) => value !== null && value !== undefined && value !== '')
+        .map(([key, value]) => `
+          <div class="item">
+            <strong>${safeText(key.replaceAll('_', ' '))}</strong><br>
+            <span class="meta">${safeText(value)}</span>
+          </div>
+        `)
+        .join('');
+      body.innerHTML = rows || '<p>No release details available.</p>';
+      modal.classList.add('open');
+    }
+
+    function closeReleaseDetails(event) {
+      if (event && event.target && event.target.id !== 'release-modal') {
+        return;
+      }
+      selectedReleaseDetails = null;
+      const modal = document.getElementById('release-modal');
+      if (modal) {
+        modal.classList.remove('open');
+      }
     }
 
     async function loadOperationsBoard() {

@@ -885,6 +885,7 @@ class ProjectService:
             "url": f"https://{ready_url}" if ready_url and not ready_url.startswith("http") else ready_url,
             "management_url": inspector_url or deployment.get("management_url"),
             "service_name": str(latest.get("name") or deployment.get("service_name") or "").strip(),
+            "deploy_id": str(latest.get("uid") or latest.get("id") or "").strip(),
             "availability_reason": self._compose_live_deployment_reason(
                 provider="vercel",
                 state=live_state,
@@ -1189,6 +1190,19 @@ class ProjectService:
                     "url": str(item.get("deploy_url") or item.get("url") or "").strip(),
                     "summary": str(item.get("context") or item.get("branch") or raw_state or "deploy").strip(),
                     "is_current": deploy_id == current_deploy_id,
+                    "details": {
+                        "provider": "netlify",
+                        "deploy_id": deploy_id,
+                        "state": raw_state,
+                        "created_at": str(item.get("created_at") or "").strip(),
+                        "updated_at": str(item.get("updated_at") or "").strip(),
+                        "branch": str(item.get("branch") or "").strip(),
+                        "context": str(item.get("context") or "").strip(),
+                        "commit_ref": str(item.get("commit_ref") or "").strip(),
+                        "title": str(item.get("title") or "").strip(),
+                        "url": str(item.get("deploy_url") or item.get("url") or "").strip(),
+                        "safety_note": "Rollback will republish this historical Netlify deploy as the current production release.",
+                    },
                     "actions": (
                         [{"id": "restore_previous_deploy", "label": "Rollback"}]
                         if deploy_id and deploy_id != current_deploy_id and raw_state.lower() in {"old", "ready", "current", "published"}
@@ -1231,6 +1245,16 @@ class ProjectService:
                     "url": "",
                     "summary": str(commit.get("message") or raw_state or "deploy").strip(),
                     "is_current": deploy_id == current_deploy_id,
+                    "details": {
+                        "provider": "render",
+                        "deploy_id": deploy_id,
+                        "state": raw_state,
+                        "created_at": str(item.get("createdAt") or "").strip(),
+                        "updated_at": str(item.get("updatedAt") or item.get("finishedAt") or "").strip(),
+                        "commit_message": str(commit.get("message") or "").strip(),
+                        "commit_id": str(commit.get("id") or "").strip(),
+                        "safety_note": "Render history is currently read-only in Radar. Use the provider console if you need a manual rollback workflow.",
+                    },
                     "actions": [],
                 }
             )
@@ -1279,6 +1303,18 @@ class ProjectService:
                     "url": f"https://{ready_url}" if ready_url and not ready_url.startswith("http") else ready_url,
                     "summary": str(item.get("checksConclusion") or item.get("target") or raw_state or "deploy").strip(),
                     "is_current": deploy_id == current_deploy_id,
+                    "details": {
+                        "provider": "vercel",
+                        "deploy_id": deploy_id,
+                        "state": raw_state,
+                        "created_at": self._epoch_millis_to_iso(item.get("createdAt") or item.get("created")),
+                        "ready_at": self._epoch_millis_to_iso(item.get("ready")),
+                        "checks": str(item.get("checksConclusion") or item.get("checksState") or "").strip(),
+                        "target": str(item.get("target") or "").strip(),
+                        "url": f"https://{ready_url}" if ready_url and not ready_url.startswith("http") else ready_url,
+                        "inspector_url": str(item.get("inspectorUrl") or "").strip(),
+                        "safety_note": "Vercel history is currently read-only in Radar. Use the provider console for promotion or rollback.",
+                    },
                     "actions": [],
                 }
             )
