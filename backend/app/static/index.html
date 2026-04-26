@@ -483,8 +483,10 @@
               <strong>${safeText(item.display_name, 'Unknown project')}</strong><br>
               <span class="meta">${safeText(item.provider)} - ${safeText(item.environment)}</span><br>
               <span class="meta">state ${safeText(item.state)}</span><br>
+              ${item.updated_at ? `<span class="meta">updated ${safeText(item.updated_at)}</span><br>` : ''}
               ${item.service_name ? `<span class="meta">service ${safeText(item.service_name)}</span><br>` : ''}
               <span class="meta">${safeText(item.availability_reason, item.runnable ? `Runnable locally via ${item.command || 'configured command'}.` : 'Manual management only from this machine.')}</span>
+              ${item.url ? `<br><span class="meta">${safeText(item.url)}</span>` : ''}
             </div>
             <div class="actions" style="margin-top:0">
               ${item.project_id ? `<button class="btn secondary" onclick="selectProject(${item.project_id})">Open Project</button>` : ''}
@@ -612,6 +614,7 @@
                 <strong>${safeText(target.provider)}</strong> - ${safeText(target.environment)}<br>
                 ${target.service_name ? `<span class="meta">service ${safeText(target.service_name)}</span><br>` : ''}
                 <span class="meta">state ${safeText(target.state)}</span><br>
+                ${target.updated_at ? `<span class="meta">updated ${safeText(target.updated_at)}</span><br>` : ''}
                 <span class="meta">marker ${safeText(target.marker, 'unknown')}</span><br>
                 <span class="meta">${safeText(target.availability_reason, target.runnable ? `Runnable locally via ${target.command || 'configured command'}.` : 'Manual management only from this machine.')}</span>
                 ${target.url ? `<br><span class="meta">${safeText(target.url)}</span>` : ''}

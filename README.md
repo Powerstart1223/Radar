@@ -12,6 +12,7 @@ This current build includes:
 - project review, repo refresh, GitHub sync, and attention queues
 - agent run queueing with logs per project
 - deployment target detection for common providers, provider console links, and one-click deploy when a local provider CLI is available
+- live deployment status enrichment for Vercel, Netlify, and Render when `PROJECT_RADAR_VERCEL_TOKEN`, `PROJECT_RADAR_NETLIFY_TOKEN`, or `PROJECT_RADAR_RENDER_TOKEN` are set
 - portfolio operations board for runs and deployments across all projects
 - local HTML shell at `/`
 

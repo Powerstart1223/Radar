@@ -20,6 +20,9 @@ class Settings:
     codex_sessions_root: Path
     openclaw_sessions_root: Path
     github_token: str
+    vercel_token: str
+    netlify_token: str
+    render_token: str
 
 
 def get_settings() -> Settings:
@@ -37,4 +40,7 @@ def get_settings() -> Settings:
         codex_sessions_root=Path.home() / ".codex" / "sessions",
         openclaw_sessions_root=Path.home() / ".openclaw" / "agents" / "main" / "sessions",
         github_token=os.getenv("PROJECT_RADAR_GITHUB_TOKEN", "").strip(),
+        vercel_token=os.getenv("PROJECT_RADAR_VERCEL_TOKEN", "").strip(),
+        netlify_token=os.getenv("PROJECT_RADAR_NETLIFY_TOKEN", "").strip(),
+        render_token=os.getenv("PROJECT_RADAR_RENDER_TOKEN", "").strip(),
     )

@@ -3,6 +3,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from app.core.config import Settings
 from app.db.database import Database
@@ -26,6 +27,9 @@ class ProjectServiceDeploymentTests(unittest.TestCase):
             codex_sessions_root=self.base_dir / "codex",
             openclaw_sessions_root=self.base_dir / "openclaw",
             github_token="",
+            vercel_token="",
+            netlify_token="",
+            render_token="",
         )
         self.service = ProjectService(self.db, self.settings)
 
@@ -59,6 +63,167 @@ class ProjectServiceDeploymentTests(unittest.TestCase):
         self.assertEqual(target["service_name"], "radar-web")
         self.assertEqual(target["management_url"], "https://dashboard.render.com/")
         self.assertEqual(target["state"], "manual")
+
+    def test_enriches_vercel_deployment_from_api(self) -> None:
+        repo = self.base_dir / "vercel-app"
+        (repo / ".vercel").mkdir(parents=True)
+        (repo / ".vercel" / "project.json").write_text(
+            '{"projectId":"prj_123","orgId":"team_456","projectName":"radar-web"}',
+            encoding="utf-8",
+        )
+        self.settings = Settings(
+            app_name="Project Radar",
+            app_host="127.0.0.1",
+            app_port=8787,
+            base_dir=self.base_dir,
+            storage_dir=self.base_dir / "storage",
+            artifacts_dir=self.base_dir / "storage" / "artifacts",
+            logs_dir=self.base_dir / "storage" / "logs",
+            db_path=self.base_dir / "project_radar.db",
+            codex_sessions_root=self.base_dir / "codex",
+            openclaw_sessions_root=self.base_dir / "openclaw",
+            github_token="",
+            vercel_token="vercel-token",
+            netlify_token="",
+            render_token="",
+        )
+        self.service = ProjectService(self.db, self.settings)
+
+        with patch.object(
+            self.service,
+            "_http_json",
+            return_value={
+                "deployments": [
+                    {
+                        "name": "radar-web",
+                        "url": "radar-web.vercel.app",
+                        "readyState": "READY",
+                        "createdAt": 1714147200000,
+                        "inspectorUrl": "https://vercel.com/acme/radar-web/deployments/123",
+                        "checksConclusion": "succeeded",
+                    }
+                ]
+            },
+        ):
+            deployments = self.service._enrich_deployments(
+                project={"primary_local_path": str(repo)},
+                deployments=[
+                    {
+                        "provider": "vercel",
+                        "environment": "production",
+                        "state": "available",
+                        "management_url": "https://vercel.com/dashboard",
+                    }
+                ],
+            )
+
+        target = deployments[0]
+        self.assertEqual(target["state"], "finished")
+        self.assertEqual(target["service_name"], "radar-web")
+        self.assertEqual(target["url"], "https://radar-web.vercel.app")
+        self.assertEqual(target["management_url"], "https://vercel.com/acme/radar-web/deployments/123")
+        self.assertEqual(target["live_source"], "vercel_api")
+
+    def test_enriches_netlify_deployment_from_api(self) -> None:
+        repo = self.base_dir / "netlify-app"
+        (repo / ".netlify").mkdir(parents=True)
+        (repo / ".netlify" / "state.json").write_text(
+            '{"siteId":"site-123"}',
+            encoding="utf-8",
+        )
+        self.settings = Settings(
+            app_name="Project Radar",
+            app_host="127.0.0.1",
+            app_port=8787,
+            base_dir=self.base_dir,
+            storage_dir=self.base_dir / "storage",
+            artifacts_dir=self.base_dir / "storage" / "artifacts",
+            logs_dir=self.base_dir / "storage" / "logs",
+            db_path=self.base_dir / "project_radar.db",
+            codex_sessions_root=self.base_dir / "codex",
+            openclaw_sessions_root=self.base_dir / "openclaw",
+            github_token="",
+            vercel_token="",
+            netlify_token="netlify-token",
+            render_token="",
+        )
+        self.service = ProjectService(self.db, self.settings)
+
+        with patch.object(
+            self.service,
+            "_http_json",
+            return_value=[
+                {
+                    "name": "radar-site",
+                    "state": "ready",
+                    "updated_at": "2026-04-26T22:00:00Z",
+                    "deploy_url": "https://radar-site.netlify.app",
+                    "admin_url": "https://app.netlify.com/sites/radar-site",
+                    "context": "production",
+                }
+            ],
+        ):
+            deployments = self.service._enrich_deployments(
+                project={"primary_local_path": str(repo)},
+                deployments=[
+                    {
+                        "provider": "netlify",
+                        "environment": "production",
+                        "state": "manual",
+                        "management_url": "https://app.netlify.com/",
+                    }
+                ],
+            )
+
+        target = deployments[0]
+        self.assertEqual(target["state"], "finished")
+        self.assertEqual(target["service_name"], "radar-site")
+        self.assertEqual(target["url"], "https://radar-site.netlify.app")
+        self.assertEqual(target["management_url"], "https://app.netlify.com/sites/radar-site")
+        self.assertEqual(target["live_source"], "netlify_api")
+
+    def test_deployment_api_failure_falls_back_to_reason(self) -> None:
+        repo = self.base_dir / "vercel-failure"
+        (repo / ".vercel").mkdir(parents=True)
+        (repo / ".vercel" / "project.json").write_text(
+            '{"projectId":"prj_123"}',
+            encoding="utf-8",
+        )
+        self.settings = Settings(
+            app_name="Project Radar",
+            app_host="127.0.0.1",
+            app_port=8787,
+            base_dir=self.base_dir,
+            storage_dir=self.base_dir / "storage",
+            artifacts_dir=self.base_dir / "storage" / "artifacts",
+            logs_dir=self.base_dir / "storage" / "logs",
+            db_path=self.base_dir / "project_radar.db",
+            codex_sessions_root=self.base_dir / "codex",
+            openclaw_sessions_root=self.base_dir / "openclaw",
+            github_token="",
+            vercel_token="vercel-token",
+            netlify_token="",
+            render_token="",
+        )
+        self.service = ProjectService(self.db, self.settings)
+
+        with patch.object(self.service, "_http_json", side_effect=RuntimeError("bad token")):
+            deployments = self.service._enrich_deployments(
+                project={"primary_local_path": str(repo)},
+                deployments=[
+                    {
+                        "provider": "vercel",
+                        "environment": "production",
+                        "state": "available",
+                        "availability_reason": "Runnable locally via vercel --prod.",
+                    }
+                ],
+            )
+
+        target = deployments[0]
+        self.assertEqual(target["state"], "available")
+        self.assertIn("metadata is unavailable", target["availability_reason"])
+        self.assertIn("bad token", target["availability_reason"])
 
 
 if __name__ == "__main__":

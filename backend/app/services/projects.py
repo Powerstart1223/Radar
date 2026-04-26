@@ -12,6 +12,7 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
 from app.core.config import Settings
 from app.db.database import Database, utc_now_iso
@@ -76,9 +77,12 @@ class ProjectService:
             item["attention"] = attention
             item["attention_count"] = len(attention)
             item["attention_severity"] = self._highest_attention_severity(attention)
-            item["deployments"] = self._merge_deployments(
+            item["deployments"] = self._enrich_deployments(
+                project=item,
+                deployments=self._merge_deployments(
                 saved_rows=self._load_deployments_for_project(int(item["id"])),
                 detected_targets=self._detect_deploy_targets(item.get("primary_local_path")),
+                ),
             )
         return items
 
@@ -161,9 +165,12 @@ class ProjectService:
         project["related_candidates"] = [dict(candidate) for candidate in related_candidates]
         project["recent_runs"] = [dict(run) for run in recent_runs]
         project["recent_events"] = [dict(event) for event in recent_events]
-        project["deployments"] = self._merge_deployments(
-            saved_rows=self._load_deployments_for_project(project_id),
-            detected_targets=self._detect_deploy_targets(project.get("primary_local_path")),
+        project["deployments"] = self._enrich_deployments(
+            project=project,
+            deployments=self._merge_deployments(
+                saved_rows=self._load_deployments_for_project(project_id),
+                detected_targets=self._detect_deploy_targets(project.get("primary_local_path")),
+            ),
         )
         project["attention"] = self._derive_attention(project, project["recent_runs"])
         project["attention_severity"] = self._highest_attention_severity(project["attention"])
@@ -745,6 +752,253 @@ class ProjectService:
             )
         return sorted(merged, key=lambda item: (str(item["provider"]), str(item["environment"])))
 
+    def _enrich_deployments(self, *, project: dict, deployments: list[dict]) -> list[dict]:
+        repo_path = Path(str(project.get("primary_local_path") or "")).expanduser()
+        if not repo_path.exists():
+            return deployments
+
+        enriched: list[dict] = []
+        for deployment in deployments:
+            item = dict(deployment)
+            provider = str(item.get("provider") or "").strip().lower()
+            try:
+                live_data = self._fetch_live_deployment(provider=provider, repo_path=repo_path, deployment=item)
+            except RuntimeError as exc:
+                live_data = {
+                    "live_error": str(exc),
+                    "availability_reason": self._deployment_api_error_reason(
+                        provider=provider,
+                        fallback_reason=str(item.get("availability_reason") or ""),
+                        error=str(exc),
+                    ),
+                }
+            if live_data:
+                item.update({key: value for key, value in live_data.items() if value not in {None, ""}})
+            enriched.append(item)
+        return enriched
+
+    def _fetch_live_deployment(self, *, provider: str, repo_path: Path, deployment: dict) -> dict:
+        if provider == "vercel" and self.settings.vercel_token:
+            return self._fetch_vercel_deployment(repo_path=repo_path, deployment=deployment)
+        if provider == "netlify" and self.settings.netlify_token:
+            return self._fetch_netlify_deployment(repo_path=repo_path, deployment=deployment)
+        if provider == "render" and self.settings.render_token:
+            return self._fetch_render_deployment(deployment=deployment)
+        return {}
+
+    def _fetch_vercel_deployment(self, *, repo_path: Path, deployment: dict) -> dict:
+        config = self._read_json_file(repo_path / ".vercel" / "project.json")
+        project_id = str(config.get("projectId") or "").strip()
+        if not project_id:
+            return {}
+
+        params = {
+            "projectId": project_id,
+            "limit": "1",
+            "target": str(deployment.get("environment") or "production"),
+        }
+        team_id = str(config.get("orgId") or "").strip()
+        if team_id:
+            params["teamId"] = team_id
+        payload = self._http_json(
+            url=f"https://api.vercel.com/v6/deployments?{urllib.parse.urlencode(params)}",
+            headers={
+                "Authorization": f"Bearer {self.settings.vercel_token}",
+                "Accept": "application/json",
+            },
+        )
+        deployments = payload.get("deployments") if isinstance(payload, dict) else None
+        if not isinstance(deployments, list) or not deployments:
+            return {}
+
+        latest = deployments[0] if isinstance(deployments[0], dict) else {}
+        live_state = self._normalize_deployment_state(
+            provider="vercel",
+            raw_state=str(latest.get("readyState") or latest.get("state") or ""),
+        )
+        ready_url = str(latest.get("url") or "").strip()
+        inspector_url = str(latest.get("inspectorUrl") or "").strip()
+        updated_at = self._epoch_millis_to_iso(
+            latest.get("ready") or latest.get("createdAt") or latest.get("created")
+        )
+        checks = str(latest.get("checksConclusion") or latest.get("checksState") or "").strip()
+        return {
+            "state": live_state,
+            "updated_at": updated_at,
+            "url": f"https://{ready_url}" if ready_url and not ready_url.startswith("http") else ready_url,
+            "management_url": inspector_url or deployment.get("management_url"),
+            "service_name": str(latest.get("name") or deployment.get("service_name") or "").strip(),
+            "availability_reason": self._compose_live_deployment_reason(
+                provider="vercel",
+                state=live_state,
+                updated_at=updated_at,
+                detail=checks,
+            ),
+            "live_source": "vercel_api",
+        }
+
+    def _fetch_netlify_deployment(self, *, repo_path: Path, deployment: dict) -> dict:
+        state = self._read_json_file(repo_path / ".netlify" / "state.json")
+        site_id = str(state.get("siteId") or state.get("site_id") or "").strip()
+        if not site_id:
+            return {}
+
+        payload = self._http_json(
+            url=f"https://api.netlify.com/api/v1/sites/{urllib.parse.quote(site_id, safe='')}/deploys",
+            headers={
+                "Authorization": f"Bearer {self.settings.netlify_token}",
+                "Accept": "application/json",
+            },
+        )
+        if not isinstance(payload, list) or not payload:
+            return {}
+
+        latest = payload[0] if isinstance(payload[0], dict) else {}
+        live_state = self._normalize_deployment_state(
+            provider="netlify",
+            raw_state=str(latest.get("state") or ""),
+        )
+        updated_at = str(latest.get("updated_at") or latest.get("created_at") or "").strip()
+        deploy_url = str(latest.get("deploy_url") or latest.get("url") or "").strip()
+        admin_url = str(latest.get("admin_url") or "").strip()
+        return {
+            "state": live_state,
+            "updated_at": updated_at,
+            "url": deploy_url,
+            "management_url": admin_url or deployment.get("management_url"),
+            "service_name": str(latest.get("name") or deployment.get("service_name") or "").strip(),
+            "availability_reason": self._compose_live_deployment_reason(
+                provider="netlify",
+                state=live_state,
+                updated_at=updated_at,
+                detail=str(latest.get("context") or "").strip(),
+            ),
+            "live_source": "netlify_api",
+        }
+
+    def _fetch_render_deployment(self, *, deployment: dict) -> dict:
+        service_name = str(deployment.get("service_name") or "").strip()
+        if not service_name:
+            return {}
+
+        service_payload = self._http_json(
+            url=f"https://api.render.com/v1/services?{urllib.parse.urlencode({'name': service_name})}",
+            headers={
+                "Authorization": f"Bearer {self.settings.render_token}",
+                "Accept": "application/json",
+            },
+        )
+        services = service_payload if isinstance(service_payload, list) else service_payload.get("services", [])
+        if not isinstance(services, list) or not services:
+            return {}
+
+        matched = next(
+            (
+                item for item in services
+                if isinstance(item, dict) and str(item.get("name") or "").strip().lower() == service_name.lower()
+            ),
+            services[0] if isinstance(services[0], dict) else {},
+        )
+        service_id = str(matched.get("id") or "").strip()
+        if not service_id:
+            return {}
+
+        deploys_payload = self._http_json(
+            url=f"https://api.render.com/v1/services/{urllib.parse.quote(service_id, safe='')}/deploys",
+            headers={
+                "Authorization": f"Bearer {self.settings.render_token}",
+                "Accept": "application/json",
+            },
+        )
+        deploys = deploys_payload if isinstance(deploys_payload, list) else deploys_payload.get("deploys", [])
+        latest = deploys[0] if isinstance(deploys, list) and deploys and isinstance(deploys[0], dict) else {}
+        live_state = self._normalize_deployment_state(
+            provider="render",
+            raw_state=str(latest.get("status") or latest.get("state") or ""),
+        )
+        updated_at = str(
+            latest.get("updatedAt")
+            or latest.get("finishedAt")
+            or latest.get("createdAt")
+            or ""
+        ).strip()
+        service_url = str(matched.get("serviceDetails", {}).get("url") or "").strip() if isinstance(matched.get("serviceDetails"), dict) else ""
+        if service_url and not service_url.startswith("http"):
+            service_url = f"https://{service_url}"
+        dashboard_url = f"https://dashboard.render.com/web/{service_id}"
+        return {
+            "state": live_state,
+            "updated_at": updated_at,
+            "url": service_url or deployment.get("url"),
+            "management_url": dashboard_url,
+            "service_name": str(matched.get("name") or service_name),
+            "availability_reason": self._compose_live_deployment_reason(
+                provider="render",
+                state=live_state,
+                updated_at=updated_at,
+                detail=str(latest.get("commit", {}).get("message") or "").strip() if isinstance(latest.get("commit"), dict) else "",
+            ),
+            "live_source": "render_api",
+        }
+
+    def _normalize_deployment_state(self, *, provider: str, raw_state: str) -> str:
+        state = raw_state.strip().lower()
+        if not state:
+            return ""
+        if provider == "vercel":
+            if state in {"ready", "completed"}:
+                return "finished"
+            if state in {"building", "queued", "initializing"}:
+                return "running"
+            if state in {"error", "failed", "canceled"}:
+                return "failed" if state != "canceled" else "cancelled"
+        if provider == "netlify":
+            if state in {"ready", "current", "published"}:
+                return "finished"
+            if state in {"new", "enqueued", "building", "processing", "preparing", "uploading", "uploaded"}:
+                return "running"
+            if state in {"error", "failed"}:
+                return "failed"
+        if provider == "render":
+            if state in {"live", "build_succeeded", "update_succeeded", "deployed"}:
+                return "finished"
+            if state in {"created", "queued", "pending", "build_in_progress", "update_in_progress", "triggered"}:
+                return "running"
+            if state in {"build_failed", "update_failed", "failed", "canceled", "cancelled"}:
+                return "failed" if state not in {"canceled", "cancelled"} else "cancelled"
+        return state
+
+    def _compose_live_deployment_reason(
+        self,
+        *,
+        provider: str,
+        state: str,
+        updated_at: str,
+        detail: str,
+    ) -> str:
+        parts = [f"Latest {provider} deployment is {state or 'unknown'}"]
+        if updated_at:
+            parts.append(f"at {updated_at}")
+        if detail:
+            parts.append(f"({detail})")
+        return " ".join(parts) + "."
+
+    def _deployment_api_error_reason(self, *, provider: str, fallback_reason: str, error: str) -> str:
+        prefix = f"Latest {provider} deployment metadata is unavailable"
+        detail = error.strip()
+        if fallback_reason:
+            return f"{prefix} ({detail}). {fallback_reason}"
+        return f"{prefix} ({detail})."
+
+    def _epoch_millis_to_iso(self, value: Any) -> str:
+        if value in {None, ""}:
+            return ""
+        try:
+            timestamp = float(value) / 1000.0
+        except (TypeError, ValueError):
+            return ""
+        return datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat()
+
     def _detect_provider_service_name(self, *, provider: str, repo_path: Path, marker: str) -> str:
         if provider == "fly":
             config = self._read_toml_file(repo_path / marker)
@@ -826,6 +1080,17 @@ class ProjectService:
             return path.read_text(encoding="utf-8")
         except OSError:
             return ""
+
+    def _http_json(self, *, url: str, headers: dict[str, str]) -> dict | list:
+        request = urllib.request.Request(url, headers=headers)
+        try:
+            with urllib.request.urlopen(request, timeout=20) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            body = exc.read().decode("utf-8", errors="ignore")
+            raise RuntimeError(f"Deployment API error {exc.code}: {body[:200]}") from exc
+        except urllib.error.URLError as exc:
+            raise RuntimeError(f"Deployment API request failed: {exc.reason}") from exc
 
     def _sync_agent_activity(self, *, source: str, sessions_root: Path, glob_pattern: str) -> dict:
         if not sessions_root.exists():
