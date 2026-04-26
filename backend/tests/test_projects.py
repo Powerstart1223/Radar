@@ -516,6 +516,30 @@ class ProjectServiceDeploymentTests(unittest.TestCase):
         self.assertEqual(result[0]["project_id"], 1)
         self.assertEqual(result[0]["deploy_id"], "n-1")
         self.assertEqual(result[1]["project_id"], 2)
+        self.assertEqual(result[0]["release_health"], "current")
+
+    def test_release_health_classification(self) -> None:
+        current = self.service._release_health({"state": "finished", "is_current": True, "details": {}})
+        rollbackable = self.service._release_health(
+            {
+                "state": "finished",
+                "is_current": False,
+                "actions": [{"id": "restore_previous_deploy"}],
+                "details": {},
+                "updated_at": "2026-04-20T00:00:00+00:00",
+            }
+        )
+        risky = self.service._release_health(
+            {
+                "state": "failed",
+                "is_current": False,
+                "details": {},
+            }
+        )
+
+        self.assertEqual(current["health"], "current")
+        self.assertEqual(rollbackable["health"], "rollbackable")
+        self.assertEqual(risky["health"], "risky")
 
 
 if __name__ == "__main__":

@@ -547,6 +547,8 @@
                 ${item.service_name ? `<span class="meta">service ${safeText(item.service_name)}</span><br>` : ''}
                 <span class="meta">state ${safeText(item.state || item.raw_state || 'unknown')}</span><br>
                 ${item.updated_at ? `<span class="meta">updated ${safeText(item.updated_at)}</span><br>` : ''}
+                ${item.release_health ? `<span class="chip ${safeText(item.release_health)}">${safeText(item.release_health)}</span><br>` : ''}
+                ${item.health_reason ? `<span class="meta">${safeText(item.health_reason)}</span><br>` : ''}
                 <span class="meta">${safeText(item.summary, 'No summary')}</span>
                 ${item.url ? `<br><span class="meta">${safeText(item.url)}</span>` : ''}
                 ${item.is_current ? `<br><span class="meta">current deployment</span>` : ''}
@@ -616,6 +618,8 @@
                   <span class="meta">${safeText(entry.deploy_id, 'unknown deploy')}</span><br>
                   <span class="meta">state ${safeText(entry.state || entry.raw_state || 'unknown')}</span><br>
                   ${entry.updated_at ? `<span class="meta">updated ${safeText(entry.updated_at)}</span><br>` : ''}
+                  ${entry.release_health ? `<span class="chip ${safeText(entry.release_health)}">${safeText(entry.release_health)}</span><br>` : ''}
+                  ${entry.health_reason ? `<span class="meta">${safeText(entry.health_reason)}</span><br>` : ''}
                   <span class="meta">${safeText(entry.summary, 'No summary')}</span>
                   ${entry.url ? `<br><span class="meta">${safeText(entry.url)}</span>` : ''}
                   ${entry.is_current ? `<br><span class="meta">current deployment</span>` : ''}

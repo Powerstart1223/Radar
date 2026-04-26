@@ -256,6 +256,7 @@ class ProjectService:
                 except ValueError:
                     continue
                 for entry in history:
+                    release_health = self._release_health(entry)
                     releases.append(
                         {
                             "project_id": project["id"],
@@ -273,6 +274,8 @@ class ProjectService:
                             "is_current": entry.get("is_current"),
                             "details": entry.get("details") or {},
                             "actions": entry.get("actions") or [],
+                            "release_health": release_health["health"],
+                            "health_reason": release_health["reason"],
                         }
                     )
         releases.sort(key=lambda item: str(item.get("updated_at") or ""), reverse=True)
@@ -1084,6 +1087,27 @@ class ProjectService:
         if detail:
             parts.append(f"({detail})")
         return " ".join(parts) + "."
+
+    def _release_health(self, entry: dict) -> dict[str, str]:
+        state = str(entry.get("state") or "").strip().lower()
+        raw_state = str(entry.get("raw_state") or "").strip().lower()
+        details = entry.get("details") or {}
+        updated_at = self._parse_iso_datetime(str(entry.get("updated_at") or ""))
+        age_cutoff = datetime.now(timezone.utc) - timedelta(days=14)
+
+        if state == "failed":
+            return {"health": "risky", "reason": "Release failed at the provider."}
+        if str(details.get("checks") or "").strip().lower() in {"failed", "error"}:
+            return {"health": "risky", "reason": "Release checks are failing."}
+        if entry.get("is_current"):
+            return {"health": "current", "reason": "This is the active release."}
+        if updated_at is not None and updated_at < age_cutoff:
+            return {"health": "stale", "reason": "Historical release is older than 14 days."}
+        if entry.get("actions"):
+            return {"health": "rollbackable", "reason": "Historical release is available for direct rollback."}
+        if raw_state in {"old", "superseded"} or not entry.get("is_current"):
+            return {"health": "superseded", "reason": "A newer release has replaced this one."}
+        return {"health": "historical", "reason": "Historical release information only."}
 
     def _deployment_actions(self, deployment: dict) -> list[dict]:
         provider = str(deployment.get("provider") or "").strip().lower()
