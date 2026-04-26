@@ -32,20 +32,22 @@ class RunService:
             if project_id is None:
                 rows = conn.execute(
                     """
-                    SELECT id, project_id, agent_type, skill_name, cwd, command, status,
-                           started_at, finished_at, output_summary, artifact_dir, log_path
-                    FROM agent_runs
-                    ORDER BY started_at DESC, id DESC
+                    SELECT ar.id, ar.project_id, p.display_name, ar.agent_type, ar.skill_name, ar.cwd, ar.command, ar.status,
+                           ar.started_at, ar.finished_at, ar.output_summary, ar.artifact_dir, ar.log_path
+                    FROM agent_runs ar
+                    LEFT JOIN projects p ON p.id = ar.project_id
+                    ORDER BY ar.started_at DESC, ar.id DESC
                     """
                 ).fetchall()
             else:
                 rows = conn.execute(
                     """
-                    SELECT id, project_id, agent_type, skill_name, cwd, command, status,
-                           started_at, finished_at, output_summary, artifact_dir, log_path
-                    FROM agent_runs
-                    WHERE project_id = ?
-                    ORDER BY started_at DESC, id DESC
+                    SELECT ar.id, ar.project_id, p.display_name, ar.agent_type, ar.skill_name, ar.cwd, ar.command, ar.status,
+                           ar.started_at, ar.finished_at, ar.output_summary, ar.artifact_dir, ar.log_path
+                    FROM agent_runs ar
+                    LEFT JOIN projects p ON p.id = ar.project_id
+                    WHERE ar.project_id = ?
+                    ORDER BY ar.started_at DESC, ar.id DESC
                     """
                     ,
                     (project_id,),

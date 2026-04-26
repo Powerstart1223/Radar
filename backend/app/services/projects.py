@@ -198,6 +198,33 @@ class ProjectService:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def list_deployments(self) -> list[dict]:
+        deployments: list[dict] = []
+        for project in self.list_projects():
+            for target in project.get("deployments", []):
+                deployments.append(
+                    {
+                        "project_id": project["id"],
+                        "display_name": project["display_name"],
+                        "provider": target.get("provider"),
+                        "environment": target.get("environment"),
+                        "state": target.get("state"),
+                        "updated_at": target.get("updated_at"),
+                        "url": target.get("url"),
+                        "marker": target.get("marker"),
+                        "command": target.get("command"),
+                        "runnable": target.get("runnable"),
+                    }
+                )
+        return sorted(
+            deployments,
+            key=lambda item: (
+                self._deployment_state_priority(item.get("state")),
+                str(item.get("display_name") or ""),
+                str(item.get("provider") or ""),
+            ),
+        )
+
     def refresh_project_repo(self, project_id: int) -> dict:
         with self.db.connect() as conn:
             project = conn.execute(
@@ -871,6 +898,18 @@ class ProjectService:
     def _attention_sort_key(self, issue: dict) -> tuple[int, str]:
         priority = {"high": 0, "medium": 1, "low": 2}.get(str(issue.get("severity")), 3)
         return (priority, str(issue.get("title") or ""))
+
+    def _deployment_state_priority(self, state: str | None) -> int:
+        return {
+            "failed": 0,
+            "cancelling": 1,
+            "running": 2,
+            "queued": 3,
+            "manual": 4,
+            "available": 5,
+            "finished": 6,
+            "cancelled": 7,
+        }.get(str(state or ""), 8)
 
     def _parse_iso_datetime(self, raw: str) -> datetime | None:
         if not raw:

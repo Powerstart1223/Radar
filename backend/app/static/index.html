@@ -258,6 +258,30 @@
     </section>
 
     <section class="panel">
+      <h2>Operations Board</h2>
+      <p>Portfolio-wide runs and deployment states, with fast filtering for active and broken work.</p>
+      <div class="form-row">
+        <div>
+          <label for="operations-view">View</label>
+          <select id="operations-view">
+            <option value="runs">Runs</option>
+            <option value="deployments">Deployments</option>
+          </select>
+        </div>
+        <div>
+          <label for="operations-filter">Filter</label>
+          <select id="operations-filter">
+            <option value="all">All</option>
+            <option value="active">Active</option>
+            <option value="failed">Failed</option>
+            <option value="manual">Manual Only</option>
+          </select>
+        </div>
+      </div>
+      <div id="operations-list">Loading operations...</div>
+    </section>
+
+    <section class="panel">
       <h2>Discovery Review</h2>
       <p>Pending candidates can be confirmed into canonical projects. This is the first review queue, not the final UI.</p>
       <div id="candidate-list">Loading candidates...</div>
@@ -280,6 +304,8 @@
     let selectedProjectId = null;
     let selectedLogRunId = null;
     let skills = [];
+    let operationsRuns = [];
+    let operationsDeployments = [];
 
     function safeEvidence(raw) {
       if (!raw) {
@@ -368,6 +394,111 @@
           </div>
         </div>
       `).join('');
+    }
+
+    function isActiveRun(item) {
+      return ['queued', 'running', 'cancelling'].includes(String(item.status || ''));
+    }
+
+    function isFailedRun(item) {
+      return String(item.status || '') === 'failed';
+    }
+
+    function isActiveDeployment(item) {
+      return ['queued', 'running', 'cancelling'].includes(String(item.state || ''));
+    }
+
+    function isFailedDeployment(item) {
+      return String(item.state || '') === 'failed';
+    }
+
+    function renderOperationsBoard() {
+      const view = document.getElementById('operations-view')?.value || 'runs';
+      const filter = document.getElementById('operations-filter')?.value || 'all';
+      const container = document.getElementById('operations-list');
+      if (!container) {
+        return;
+      }
+
+      const items = view === 'deployments' ? operationsDeployments : operationsRuns;
+      const filtered = items.filter(item => {
+        if (filter === 'all') {
+          return true;
+        }
+        if (view === 'runs') {
+          if (filter === 'active') {
+            return isActiveRun(item);
+          }
+          if (filter === 'failed') {
+            return isFailedRun(item);
+          }
+          if (filter === 'manual') {
+            return false;
+          }
+          return true;
+        }
+        if (filter === 'active') {
+          return isActiveDeployment(item);
+        }
+        if (filter === 'failed') {
+          return isFailedDeployment(item);
+        }
+        if (filter === 'manual') {
+          return String(item.state || '') === 'manual';
+        }
+        return true;
+      });
+
+      if (!filtered.length) {
+        container.innerHTML = `<p>No ${view} match the current filter.</p>`;
+        return;
+      }
+
+      if (view === 'runs') {
+        container.innerHTML = filtered.map(item => `
+          <div class="item">
+            <div class="item-header">
+              <div>
+                <strong>${item.display_name || 'Unknown project'}</strong><br>
+                <span class="meta">${item.agent_type} - ${item.skill_name}</span><br>
+                <span class="meta">${item.status} - ${item.started_at}</span><br>
+                <span class="meta">${item.output_summary || 'No summary yet'}</span>
+              </div>
+              ${item.project_id ? `<button class="btn secondary" onclick="selectProject(${item.project_id})">Open Project</button>` : ''}
+            </div>
+          </div>
+        `).join('');
+        return;
+      }
+
+      container.innerHTML = filtered.map(item => `
+        <div class="item">
+          <div class="item-header">
+            <div>
+              <strong>${item.display_name || 'Unknown project'}</strong><br>
+              <span class="meta">${item.provider} - ${item.environment}</span><br>
+              <span class="meta">state ${item.state}</span><br>
+              <span class="meta">${item.runnable ? `command ${item.command}` : 'manual management only from this machine'}</span>
+            </div>
+            <div class="actions" style="margin-top:0">
+              ${item.project_id ? `<button class="btn secondary" onclick="selectProject(${item.project_id})">Open Project</button>` : ''}
+              ${item.project_id && item.runnable ? `<button class="btn secondary" onclick="deployProject(${item.project_id})">Deploy</button>` : ''}
+            </div>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    async function loadOperationsBoard() {
+      const [runsResponse, deploymentsResponse] = await Promise.all([
+        fetch('/api/runs'),
+        fetch('/api/deployments')
+      ]);
+      const runsData = await runsResponse.json();
+      const deploymentsData = await deploymentsResponse.json();
+      operationsRuns = runsData.items || [];
+      operationsDeployments = deploymentsData.items || [];
+      renderOperationsBoard();
     }
 
     function renderSyncBanners(syncState) {
@@ -777,13 +908,14 @@
       const data = await response.json();
       document.getElementById('projects').textContent = data.projects;
       document.getElementById('candidates').textContent = data.candidates;
-      document.getElementById('runs').textContent = data.runs;
+      document.getElementById('runs').textContent = data.active_runs || data.runs;
       document.getElementById('attention-count').textContent = data.attention_count;
       document.getElementById('status-json').textContent = JSON.stringify(data, null, 2);
       renderSyncBanners(data.sync_state || []);
       await loadCandidates();
       await loadAttention();
       await loadActivity();
+      await loadOperationsBoard();
       await loadProjects();
     }
 
@@ -816,6 +948,8 @@
     document.getElementById('sync-codex').addEventListener('click', syncCodex);
     document.getElementById('sync-openclaw').addEventListener('click', syncOpenClaw);
     document.getElementById('sync-github').addEventListener('click', syncGithub);
+    document.getElementById('operations-view').addEventListener('change', renderOperationsBoard);
+    document.getElementById('operations-filter').addEventListener('change', renderOperationsBoard);
     setInterval(() => {
       if (selectedProjectId) {
         loadProjectDetail(selectedProjectId);
