@@ -18,6 +18,8 @@ from app.core.config import Settings
 from app.db.database import Database, utc_now_iso
 
 STALE_REPO_HOURS = 72
+RELEASE_SYNC_INTERVAL_MINUTES = 15
+RELEASE_SYNC_STALE_MINUTES = 45
 DEPLOY_TARGET_SPECS = (
     {
         "provider": "vercel",
@@ -281,6 +283,25 @@ class ProjectService:
         releases.sort(key=lambda item: str(item.get("updated_at") or ""), reverse=True)
         return releases[:limit]
 
+    def sync_release_metadata(self, *, limit: int = 30) -> dict:
+        releases = self.list_recent_releases(limit=limit)
+        return {
+            "status": "completed",
+            "releases": len(releases),
+            "release_sync": self.release_sync_status(),
+        }
+
+    def release_sync_status(self) -> dict:
+        with self.db.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT source, last_success_at, last_error_at, last_error_summary
+                FROM sync_state
+                WHERE source = 'deploy'
+                """
+            ).fetchone()
+        return self._release_sync_status(dict(row) if row else None)
+
     def refresh_project_repo(self, project_id: int) -> dict:
         with self.db.connect() as conn:
             project = conn.execute(
@@ -388,13 +409,25 @@ class ProjectService:
             raise ValueError(f"Deployment provider not found for project: {provider}")
 
         normalized_provider = provider.strip().lower()
-        if normalized_provider == "netlify":
-            return {"provider": normalized_provider, "items": self._netlify_deployment_history(deployment, limit=limit)}
-        if normalized_provider == "render":
-            return {"provider": normalized_provider, "items": self._render_deployment_history(deployment, limit=limit)}
-        if normalized_provider == "vercel":
-            return {"provider": normalized_provider, "items": self._vercel_deployment_history(project, deployment, limit=limit)}
-        raise ValueError(f"Deployment history is not available for provider: {provider}")
+        try:
+            if normalized_provider == "netlify":
+                items = self._netlify_deployment_history(deployment, limit=limit)
+            elif normalized_provider == "render":
+                items = self._render_deployment_history(deployment, limit=limit)
+            elif normalized_provider == "vercel":
+                items = self._vercel_deployment_history(project, deployment, limit=limit)
+            else:
+                raise ValueError(f"Deployment history is not available for provider: {provider}")
+        except RuntimeError as exc:
+            self._mark_sync_state("deploy", success=False, error_summary=str(exc))
+            raise
+        self._mark_sync_state("deploy", success=True, error_summary=None)
+        sync_status = self.release_sync_status()
+        return {
+            "provider": normalized_provider,
+            "items": [self._attach_release_sync_metadata(item, sync_status) for item in items],
+            "release_sync": sync_status,
+        }
 
     def sync_codex_activity(self) -> dict:
         return self._sync_agent_activity(source="codex", sessions_root=self.settings.codex_sessions_root, glob_pattern="*.jsonl")
@@ -1108,6 +1141,70 @@ class ProjectService:
         if raw_state in {"old", "superseded"} or not entry.get("is_current"):
             return {"health": "superseded", "reason": "A newer release has replaced this one."}
         return {"health": "historical", "reason": "Historical release information only."}
+
+    def _attach_release_sync_metadata(self, entry: dict, sync_status: dict) -> dict:
+        item = dict(entry)
+        item["release_sync_status"] = sync_status.get("status", "unknown")
+        item["release_sync_at"] = sync_status.get("last_success_at")
+        item["next_sync_due_at"] = sync_status.get("next_due_at")
+        item["release_sync_reason"] = sync_status.get("reason", "")
+        return item
+
+    def _release_sync_status(self, row: dict | None) -> dict:
+        if not row:
+            return {
+                "status": "unknown",
+                "last_success_at": None,
+                "last_error_at": None,
+                "last_error_summary": None,
+                "next_due_at": None,
+                "reason": "Release metadata has not been synced yet.",
+            }
+
+        last_success_at = str(row.get("last_success_at") or "").strip()
+        last_error_at = str(row.get("last_error_at") or "").strip()
+        last_error_summary = str(row.get("last_error_summary") or "").strip() or None
+        success_dt = self._parse_iso_datetime(last_success_at)
+        error_dt = self._parse_iso_datetime(last_error_at)
+        if error_dt is not None and (success_dt is None or error_dt > success_dt):
+            return {
+                "status": "error",
+                "last_success_at": last_success_at or None,
+                "last_error_at": last_error_at or None,
+                "last_error_summary": last_error_summary,
+                "next_due_at": None,
+                "reason": last_error_summary or "Latest release sync failed.",
+            }
+        if success_dt is None:
+            return {
+                "status": "unknown",
+                "last_success_at": None,
+                "last_error_at": last_error_at or None,
+                "last_error_summary": last_error_summary,
+                "next_due_at": None,
+                "reason": "Release metadata has not been synced yet.",
+            }
+
+        now = datetime.now(timezone.utc)
+        age_minutes = (now - success_dt).total_seconds() / 60.0
+        next_due_at = (success_dt + timedelta(minutes=RELEASE_SYNC_INTERVAL_MINUTES)).isoformat()
+        if age_minutes <= RELEASE_SYNC_INTERVAL_MINUTES:
+            status = "live"
+            reason = "Release metadata is freshly synced."
+        elif age_minutes <= RELEASE_SYNC_STALE_MINUTES:
+            status = "recent"
+            reason = "Release metadata is still recent but approaching the refresh window."
+        else:
+            status = "stale"
+            reason = "Release metadata is older than the expected refresh window."
+        return {
+            "status": status,
+            "last_success_at": last_success_at,
+            "last_error_at": last_error_at or None,
+            "last_error_summary": last_error_summary,
+            "next_due_at": next_due_at,
+            "reason": reason,
+        }
 
     def _deployment_actions(self, deployment: dict) -> list[dict]:
         provider = str(deployment.get("provider") or "").strip().lower()

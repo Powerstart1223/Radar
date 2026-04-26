@@ -47,6 +47,7 @@ class SystemService:
             "active_runs": active_run_count,
             "deployments": len(deployments),
             "deploy_summary": deploy_summary,
+            "release_sync": self.projects.release_sync_status(),
             "attention": attention_summary,
             "attention_count": len(attention_queue),
             "sync_state": [dict(row) for row in sync_rows],

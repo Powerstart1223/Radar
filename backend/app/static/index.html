@@ -247,6 +247,7 @@
       <button class="btn secondary" id="sync-codex">Sync Codex</button>
       <button class="btn secondary" id="sync-openclaw">Sync OpenClaw</button>
       <button class="btn secondary" id="sync-github">Sync GitHub</button>
+      <button class="btn secondary" id="sync-deployments">Sync Deployments</button>
       <button class="btn secondary" id="load-status">Refresh Status</button>
     </section>
 
@@ -549,6 +550,8 @@
                 ${item.updated_at ? `<span class="meta">updated ${safeText(item.updated_at)}</span><br>` : ''}
                 ${item.release_health ? `<span class="chip ${safeText(item.release_health)}">${safeText(item.release_health)}</span><br>` : ''}
                 ${item.health_reason ? `<span class="meta">${safeText(item.health_reason)}</span><br>` : ''}
+                ${item.release_sync_status ? `<span class="chip ${safeText(item.release_sync_status)}">${safeText(item.release_sync_status)}</span><br>` : ''}
+                ${item.release_sync_reason ? `<span class="meta">${safeText(item.release_sync_reason)}</span><br>` : ''}
                 <span class="meta">${safeText(item.summary, 'No summary')}</span>
                 ${item.url ? `<br><span class="meta">${safeText(item.url)}</span>` : ''}
                 ${item.is_current ? `<br><span class="meta">current deployment</span>` : ''}
@@ -620,6 +623,8 @@
                   ${entry.updated_at ? `<span class="meta">updated ${safeText(entry.updated_at)}</span><br>` : ''}
                   ${entry.release_health ? `<span class="chip ${safeText(entry.release_health)}">${safeText(entry.release_health)}</span><br>` : ''}
                   ${entry.health_reason ? `<span class="meta">${safeText(entry.health_reason)}</span><br>` : ''}
+                  ${entry.release_sync_status ? `<span class="chip ${safeText(entry.release_sync_status)}">${safeText(entry.release_sync_status)}</span><br>` : ''}
+                  ${entry.release_sync_reason ? `<span class="meta">${safeText(entry.release_sync_reason)}</span><br>` : ''}
                   <span class="meta">${safeText(entry.summary, 'No summary')}</span>
                   ${entry.url ? `<br><span class="meta">${safeText(entry.url)}</span>` : ''}
                   ${entry.is_current ? `<br><span class="meta">current deployment</span>` : ''}
@@ -1074,6 +1079,19 @@
       document.getElementById('status-json').textContent = JSON.stringify(data, null, 2);
     }
 
+    async function syncDeployments() {
+      const response = await fetch('/api/sync/deployments', {
+        method: 'POST'
+      });
+      const data = await response.json();
+      await loadStatus();
+      if (selectedProjectId) {
+        await loadProjectDetail(selectedProjectId);
+      }
+      await loadOperationsBoard();
+      document.getElementById('status-json').textContent = JSON.stringify(data, null, 2);
+    }
+
     async function syncProjectGithub(projectId) {
       const response = await fetch(`/api/projects/${projectId}/sync/github`, {
         method: 'POST'
@@ -1229,6 +1247,7 @@
     document.getElementById('sync-codex').addEventListener('click', syncCodex);
     document.getElementById('sync-openclaw').addEventListener('click', syncOpenClaw);
     document.getElementById('sync-github').addEventListener('click', syncGithub);
+    document.getElementById('sync-deployments').addEventListener('click', syncDeployments);
     document.getElementById('operations-view').addEventListener('change', renderOperationsBoard);
     document.getElementById('operations-filter').addEventListener('change', renderOperationsBoard);
     setInterval(() => {

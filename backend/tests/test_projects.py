@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+from datetime import datetime, timedelta, timezone
 
 from app.core.config import Settings
 from app.db.database import Database
@@ -15,6 +16,7 @@ class ProjectServiceDeploymentTests(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.base_dir = Path(self.temp_dir.name)
         self.db = Database(self.base_dir / "project_radar.db")
+        self.db.init()
         self.settings = Settings(
             app_name="Project Radar",
             app_host="127.0.0.1",
@@ -540,6 +542,43 @@ class ProjectServiceDeploymentTests(unittest.TestCase):
         self.assertEqual(current["health"], "current")
         self.assertEqual(rollbackable["health"], "rollbackable")
         self.assertEqual(risky["health"], "risky")
+
+    def test_release_sync_status_classification(self) -> None:
+        now = datetime.now(timezone.utc)
+        live = self.service._release_sync_status(
+            {"last_success_at": (now - timedelta(minutes=5)).isoformat(), "last_error_at": None, "last_error_summary": None}
+        )
+        stale = self.service._release_sync_status(
+            {"last_success_at": (now - timedelta(minutes=90)).isoformat(), "last_error_at": None, "last_error_summary": None}
+        )
+        error = self.service._release_sync_status(
+            {
+                "last_success_at": (now - timedelta(minutes=30)).isoformat(),
+                "last_error_at": (now - timedelta(minutes=1)).isoformat(),
+                "last_error_summary": "provider timeout",
+            }
+        )
+
+        self.assertEqual(live["status"], "live")
+        self.assertEqual(stale["status"], "stale")
+        self.assertEqual(error["status"], "error")
+
+    def test_sync_release_metadata_returns_sync_status(self) -> None:
+        self.service = ProjectService(self.db, self.settings)
+        with patch.object(
+            self.service,
+            "list_recent_releases",
+            return_value=[{"deploy_id": "dep-1"}],
+        ), patch.object(
+            self.service,
+            "release_sync_status",
+            return_value={"status": "live", "reason": "fresh"},
+        ):
+            result = self.service.sync_release_metadata(limit=10)
+
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["releases"], 1)
+        self.assertEqual(result["release_sync"]["status"], "live")
 
 
 if __name__ == "__main__":

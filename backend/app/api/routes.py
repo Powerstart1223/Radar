@@ -125,6 +125,10 @@ def build_router(
     def sync_github() -> dict:
         return projects.sync_github_pull_requests()
 
+    @router.post("/api/sync/deployments")
+    def sync_deployments() -> dict:
+        return projects.sync_release_metadata()
+
     @router.post("/api/discovery/confirm")
     def confirm_candidate(payload: dict) -> dict:
         candidate_id = payload.get("candidate_id")
