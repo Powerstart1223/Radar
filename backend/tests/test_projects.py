@@ -520,6 +520,50 @@ class ProjectServiceDeploymentTests(unittest.TestCase):
         self.assertEqual(result[1]["project_id"], 2)
         self.assertEqual(result[0]["release_health"], "current")
 
+    def test_list_recent_releases_uses_cached_snapshots(self) -> None:
+        self.service = ProjectService(self.db, self.settings)
+        self.service._store_release_snapshots(
+            [
+                {
+                    "project_id": 1,
+                    "provider": "netlify",
+                    "environment": "production",
+                    "service_name": "radar-site",
+                    "management_url": "https://app.netlify.com/sites/radar-site",
+                    "deploy_id": "dep-1",
+                    "state": "finished",
+                    "raw_state": "ready",
+                    "updated_at": "2026-04-26T23:00:00Z",
+                    "url": "https://radar-site.netlify.app",
+                    "summary": "production",
+                    "is_current": True,
+                    "details": {"provider": "netlify"},
+                    "actions": [{"id": "restore_previous_deploy"}],
+                    "release_health": "current",
+                    "health_reason": "This is the active release.",
+                    "release_sync_status": "live",
+                    "release_sync_at": "2026-04-26T23:05:00Z",
+                    "next_sync_due_at": "2026-04-26T23:20:00Z",
+                    "release_sync_reason": "Release metadata is freshly synced.",
+                }
+            ]
+        )
+        with self.db.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO projects (id, display_name, primary_local_path, remote_url, default_branch, owner, status, source_confidence, created_at, updated_at)
+                VALUES (1, 'Radar', '', '', '', '', 'confirmed', 1.0, '2026-04-26T00:00:00Z', '2026-04-26T00:00:00Z')
+                """
+            )
+            conn.commit()
+
+        with patch.object(self.service, "_collect_recent_releases_live") as live_collector:
+            result = self.service.list_recent_releases(limit=10)
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["deploy_id"], "dep-1")
+        live_collector.assert_not_called()
+
     def test_release_health_classification(self) -> None:
         current = self.service._release_health({"state": "finished", "is_current": True, "details": {}})
         rollbackable = self.service._release_health(
@@ -567,8 +611,11 @@ class ProjectServiceDeploymentTests(unittest.TestCase):
         self.service = ProjectService(self.db, self.settings)
         with patch.object(
             self.service,
-            "list_recent_releases",
+            "_collect_recent_releases_live",
             return_value=[{"deploy_id": "dep-1"}],
+        ), patch.object(
+            self.service,
+            "_store_release_snapshots",
         ), patch.object(
             self.service,
             "release_sync_status",

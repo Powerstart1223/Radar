@@ -244,50 +244,15 @@ class ProjectService:
         )
 
     def list_recent_releases(self, *, limit: int = 30, per_deployment_limit: int = 3) -> list[dict]:
-        releases: list[dict] = []
-        for project in self.list_projects():
-            for target in project.get("deployments", []):
-                if not target.get("history_supported"):
-                    continue
-                provider = str(target.get("provider") or "").strip().lower()
-                try:
-                    history = self.list_deployment_history(
-                        int(project["id"]),
-                        provider,
-                        limit=per_deployment_limit,
-                    ).get("items", [])
-                except RuntimeError:
-                    continue
-                except ValueError:
-                    continue
-                for entry in history:
-                    release_health = self._release_health(entry)
-                    releases.append(
-                        {
-                            "project_id": project["id"],
-                            "display_name": project["display_name"],
-                            "provider": provider,
-                            "environment": target.get("environment"),
-                            "service_name": target.get("service_name"),
-                            "management_url": target.get("management_url"),
-                            "deploy_id": entry.get("deploy_id"),
-                            "state": entry.get("state"),
-                            "raw_state": entry.get("raw_state"),
-                            "updated_at": entry.get("updated_at"),
-                            "url": entry.get("url"),
-                            "summary": entry.get("summary"),
-                            "is_current": entry.get("is_current"),
-                            "details": entry.get("details") or {},
-                            "actions": entry.get("actions") or [],
-                            "release_health": release_health["health"],
-                            "health_reason": release_health["reason"],
-                        }
-                    )
-        releases.sort(key=lambda item: str(item.get("updated_at") or ""), reverse=True)
-        return releases[:limit]
+        cached = self._load_release_snapshots(limit=limit)
+        if cached:
+            return cached
+        return self._collect_recent_releases_live(limit=limit, per_deployment_limit=per_deployment_limit)
 
     def sync_release_metadata(self, *, limit: int = 30) -> dict:
-        releases = self.list_recent_releases(limit=limit)
+        releases = self._collect_recent_releases_live(limit=limit)
+        self._store_release_snapshots(releases)
+        self._mark_sync_state("deploy", success=True, error_summary=None)
         return {
             "status": "completed",
             "releases": len(releases),
@@ -320,6 +285,54 @@ class ProjectService:
                 """
             ).fetchone()
         return self._release_sync_status(dict(row) if row else None)
+
+    def _collect_recent_releases_live(self, *, limit: int = 30, per_deployment_limit: int = 3) -> list[dict]:
+        releases: list[dict] = []
+        for project in self.list_projects():
+            for target in project.get("deployments", []):
+                if not target.get("history_supported"):
+                    continue
+                provider = str(target.get("provider") or "").strip().lower()
+                try:
+                    history_result = self.list_deployment_history(
+                        int(project["id"]),
+                        provider,
+                        limit=per_deployment_limit,
+                    )
+                    history = history_result.get("items", [])
+                except RuntimeError:
+                    continue
+                except ValueError:
+                    continue
+                for entry in history:
+                    release_health = self._release_health(entry)
+                    releases.append(
+                        {
+                            "project_id": project["id"],
+                            "display_name": project["display_name"],
+                            "provider": provider,
+                            "environment": target.get("environment"),
+                            "service_name": target.get("service_name"),
+                            "management_url": target.get("management_url"),
+                            "deploy_id": entry.get("deploy_id"),
+                            "state": entry.get("state"),
+                            "raw_state": entry.get("raw_state"),
+                            "updated_at": entry.get("updated_at"),
+                            "url": entry.get("url"),
+                            "summary": entry.get("summary"),
+                            "is_current": entry.get("is_current"),
+                            "details": entry.get("details") or {},
+                            "actions": entry.get("actions") or [],
+                            "release_health": release_health["health"],
+                            "health_reason": release_health["reason"],
+                            "release_sync_status": entry.get("release_sync_status"),
+                            "release_sync_at": entry.get("release_sync_at"),
+                            "next_sync_due_at": entry.get("next_sync_due_at"),
+                            "release_sync_reason": entry.get("release_sync_reason"),
+                        }
+                    )
+        releases.sort(key=lambda item: str(item.get("updated_at") or ""), reverse=True)
+        return releases[:limit]
 
     def refresh_project_repo(self, project_id: int) -> dict:
         with self.db.connect() as conn:
@@ -1236,6 +1249,95 @@ class ProjectService:
             if self._release_sync_stop.wait(wait_seconds):
                 return
 
+    def _store_release_snapshots(self, releases: list[dict]) -> None:
+        captured_at = utc_now_iso()
+        with self.db.connect() as conn:
+            conn.execute("DELETE FROM release_snapshots")
+            conn.executemany(
+                """
+                INSERT INTO release_snapshots (
+                    project_id, provider, environment, service_name, management_url, deploy_id,
+                    state, raw_state, updated_at, url, summary, is_current, details_json,
+                    actions_json, release_health, health_reason, release_sync_status,
+                    release_sync_at, next_sync_due_at, release_sync_reason, captured_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        int(item["project_id"]),
+                        str(item.get("provider") or ""),
+                        str(item.get("environment") or "production"),
+                        str(item.get("service_name") or ""),
+                        str(item.get("management_url") or ""),
+                        str(item.get("deploy_id") or ""),
+                        str(item.get("state") or ""),
+                        str(item.get("raw_state") or ""),
+                        str(item.get("updated_at") or ""),
+                        str(item.get("url") or ""),
+                        str(item.get("summary") or ""),
+                        1 if item.get("is_current") else 0,
+                        json.dumps(item.get("details") or {}),
+                        json.dumps(item.get("actions") or []),
+                        str(item.get("release_health") or ""),
+                        str(item.get("health_reason") or ""),
+                        str(item.get("release_sync_status") or ""),
+                        str(item.get("release_sync_at") or ""),
+                        str(item.get("next_sync_due_at") or ""),
+                        str(item.get("release_sync_reason") or ""),
+                        captured_at,
+                    )
+                    for item in releases
+                    if str(item.get("deploy_id") or "").strip()
+                ],
+            )
+            conn.commit()
+
+    def _load_release_snapshots(self, *, limit: int) -> list[dict]:
+        with self.db.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT rs.project_id, p.display_name, rs.provider, rs.environment, rs.service_name,
+                       rs.management_url, rs.deploy_id, rs.state, rs.raw_state, rs.updated_at,
+                       rs.url, rs.summary, rs.is_current, rs.details_json, rs.actions_json,
+                       rs.release_health, rs.health_reason, rs.release_sync_status,
+                       rs.release_sync_at, rs.next_sync_due_at, rs.release_sync_reason
+                FROM release_snapshots rs
+                LEFT JOIN projects p ON p.id = rs.project_id
+                ORDER BY COALESCE(rs.updated_at, rs.captured_at) DESC, rs.id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        snapshots: list[dict] = []
+        for row in rows:
+            item = dict(row)
+            snapshots.append(
+                {
+                    "project_id": int(item["project_id"]),
+                    "display_name": item.get("display_name"),
+                    "provider": item.get("provider"),
+                    "environment": item.get("environment"),
+                    "service_name": item.get("service_name"),
+                    "management_url": item.get("management_url"),
+                    "deploy_id": item.get("deploy_id"),
+                    "state": item.get("state"),
+                    "raw_state": item.get("raw_state"),
+                    "updated_at": item.get("updated_at"),
+                    "url": item.get("url"),
+                    "summary": item.get("summary"),
+                    "is_current": bool(item.get("is_current")),
+                    "details": self._parse_json_text(str(item.get("details_json") or "{}"), default={}),
+                    "actions": self._parse_json_text(str(item.get("actions_json") or "[]"), default=[]),
+                    "release_health": item.get("release_health"),
+                    "health_reason": item.get("health_reason"),
+                    "release_sync_status": item.get("release_sync_status"),
+                    "release_sync_at": item.get("release_sync_at"),
+                    "next_sync_due_at": item.get("next_sync_due_at"),
+                    "release_sync_reason": item.get("release_sync_reason"),
+                }
+            )
+        return snapshots
+
     def _deployment_actions(self, deployment: dict) -> list[dict]:
         provider = str(deployment.get("provider") or "").strip().lower()
         actions: list[dict] = []
@@ -1594,6 +1696,15 @@ class ProjectService:
         except (OSError, json.JSONDecodeError):
             return {}
         return data if isinstance(data, dict) else {}
+
+    def _parse_json_text(self, raw: str, *, default):
+        if not raw.strip():
+            return default
+        try:
+            value = json.loads(raw)
+        except json.JSONDecodeError:
+            return default
+        return value
 
     def _read_toml_file(self, path: Path) -> dict:
         try:

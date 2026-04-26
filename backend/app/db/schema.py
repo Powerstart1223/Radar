@@ -87,6 +87,33 @@ SCHEMA_STATEMENTS = (
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS release_snapshots (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id INTEGER NOT NULL,
+        provider TEXT NOT NULL,
+        environment TEXT NOT NULL,
+        service_name TEXT,
+        management_url TEXT,
+        deploy_id TEXT NOT NULL,
+        state TEXT,
+        raw_state TEXT,
+        updated_at TEXT,
+        url TEXT,
+        summary TEXT,
+        is_current INTEGER NOT NULL DEFAULT 0,
+        details_json TEXT NOT NULL DEFAULT '{}',
+        actions_json TEXT NOT NULL DEFAULT '[]',
+        release_health TEXT,
+        health_reason TEXT,
+        release_sync_status TEXT,
+        release_sync_at TEXT,
+        next_sync_due_at TEXT,
+        release_sync_reason TEXT,
+        captured_at TEXT NOT NULL,
+        FOREIGN KEY(project_id) REFERENCES projects(id)
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS alerts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         project_id INTEGER NOT NULL,
