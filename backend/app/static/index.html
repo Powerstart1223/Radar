@@ -318,6 +318,11 @@
       }
     }
 
+    function safeText(value, fallback = '') {
+      const normalized = value === null || value === undefined || value === '' ? fallback : String(value);
+      return escapeHtml(normalized);
+    }
+
     async function loadCandidates() {
       const response = await fetch('/api/discovery/candidates');
       const data = await response.json();
@@ -328,14 +333,14 @@
         return;
       }
       container.innerHTML = pending.map(item => {
-        const evidence = safeEvidence(item.evidence_json);
+        const evidence = escapeHtml(safeEvidence(item.evidence_json));
         return `
           <div class="item">
             <div class="item-header">
               <div>
-                <strong>${item.display_name}</strong><br>
-                <span class="label">${item.source}</span><br>
-                <span style="color:var(--muted)">confidence ${item.confidence}</span>
+                <strong>${safeText(item.display_name)}</strong><br>
+                <span class="label">${safeText(item.source)}</span><br>
+                <span style="color:var(--muted)">confidence ${safeText(item.confidence)}</span>
               </div>
               <button class="btn secondary" onclick="confirmCandidate(${item.id})">Confirm</button>
             </div>
@@ -358,15 +363,15 @@
         <div class="item">
           <div class="item-header">
             <div>
-              <strong>${item.display_name}</strong><br>
-              <span class="meta">${item.title}</span><br>
-              <span class="meta">${item.detail}</span>
+              <strong>${safeText(item.display_name)}</strong><br>
+              <span class="meta">${safeText(item.title)}</span><br>
+              <span class="meta">${safeText(item.detail)}</span>
             </div>
             <button class="btn secondary" onclick="selectProject(${item.project_id})">Open Project</button>
           </div>
           <div class="chips">
-            <span class="chip ${item.severity}">${item.severity}</span>
-            <span class="chip">${item.type}</span>
+            <span class="chip ${safeText(item.severity)}">${safeText(item.severity)}</span>
+            <span class="chip">${safeText(item.type)}</span>
           </div>
         </div>
       `).join('');
@@ -385,10 +390,10 @@
         <div class="item">
           <div class="item-header">
             <div>
-              <strong>${item.display_name || 'Unmatched project'}</strong><br>
-              <span class="meta">${item.source} - ${item.event_type}</span><br>
-              <span class="meta">${item.occurred_at}</span><br>
-              <span class="meta">${item.summary || 'No summary'}</span>
+              <strong>${safeText(item.display_name, 'Unmatched project')}</strong><br>
+              <span class="meta">${safeText(item.source)} - ${safeText(item.event_type)}</span><br>
+              <span class="meta">${safeText(item.occurred_at)}</span><br>
+              <span class="meta">${safeText(item.summary, 'No summary')}</span>
             </div>
             ${item.project_id ? `<button class="btn secondary" onclick="selectProject(${item.project_id})">Open Project</button>` : ''}
           </div>
@@ -459,10 +464,10 @@
           <div class="item">
             <div class="item-header">
               <div>
-                <strong>${item.display_name || 'Unknown project'}</strong><br>
-                <span class="meta">${item.agent_type} - ${item.skill_name}</span><br>
-                <span class="meta">${item.status} - ${item.started_at}</span><br>
-                <span class="meta">${item.output_summary || 'No summary yet'}</span>
+                <strong>${safeText(item.display_name, 'Unknown project')}</strong><br>
+                <span class="meta">${safeText(item.agent_type)} - ${safeText(item.skill_name)}</span><br>
+                <span class="meta">${safeText(item.status)} - ${safeText(item.started_at)}</span><br>
+                <span class="meta">${safeText(item.output_summary, 'No summary yet')}</span>
               </div>
               ${item.project_id ? `<button class="btn secondary" onclick="selectProject(${item.project_id})">Open Project</button>` : ''}
             </div>
@@ -475,10 +480,10 @@
         <div class="item">
           <div class="item-header">
             <div>
-              <strong>${item.display_name || 'Unknown project'}</strong><br>
-              <span class="meta">${item.provider} - ${item.environment}</span><br>
-              <span class="meta">state ${item.state}</span><br>
-              <span class="meta">${item.runnable ? `command ${item.command}` : 'manual management only from this machine'}</span>
+              <strong>${safeText(item.display_name, 'Unknown project')}</strong><br>
+              <span class="meta">${safeText(item.provider)} - ${safeText(item.environment)}</span><br>
+              <span class="meta">state ${safeText(item.state)}</span><br>
+              <span class="meta">${item.runnable ? `command ${safeText(item.command)}` : 'manual management only from this machine'}</span>
             </div>
             <div class="actions" style="margin-top:0">
               ${item.project_id ? `<button class="btn secondary" onclick="selectProject(${item.project_id})">Open Project</button>` : ''}
@@ -518,10 +523,10 @@
           : 'No successful sync recorded yet';
         return `
           <div class="banner ${severity}">
-            <strong>${item.source} sync needs attention</strong><br>
-            <span class="meta">${item.last_error_summary || 'Unknown sync failure'}</span><br>
-            <span class="meta">Last error ${item.last_error_at}</span><br>
-            <span class="meta">${freshness}</span>
+            <strong>${safeText(item.source)} sync needs attention</strong><br>
+            <span class="meta">${safeText(item.last_error_summary, 'Unknown sync failure')}</span><br>
+            <span class="meta">Last error ${safeText(item.last_error_at)}</span><br>
+            <span class="meta">${safeText(freshness)}</span>
           </div>
         `;
       }).join('')}</div>`;
@@ -550,20 +555,20 @@
         <div class="item">
           <div class="item-header">
             <div>
-              <strong>${item.display_name}</strong><br>
-              <span class="meta">${item.primary_local_path || 'No local path yet'}</span>
+              <strong>${safeText(item.display_name)}</strong><br>
+              <span class="meta">${safeText(item.primary_local_path, 'No local path yet')}</span>
             </div>
             <button class="btn ${selectedProjectId === item.id ? '' : 'secondary'}" onclick="selectProject(${item.id})">
               ${selectedProjectId === item.id ? 'Selected' : 'Open'}
             </button>
           </div>
           <div class="chips">
-            <span class="chip">status ${item.status}</span>
-            <span class="chip">branch ${item.branch || 'unknown'}</span>
-            <span class="chip">PR ${item.pr_state || 'unknown'}</span>
-            <span class="chip">checks ${item.checks_state || 'unknown'}</span>
-            ${item.attention_count ? `<span class="chip ${item.attention_severity}">${item.attention_severity} attention ${item.attention_count}</span>` : ''}
-            ${(item.deployments || []).length ? `<span class="chip">deploy ${(item.deployments || []).map(target => target.provider).join(', ')}</span>` : ''}
+            <span class="chip">status ${safeText(item.status)}</span>
+            <span class="chip">branch ${safeText(item.branch, 'unknown')}</span>
+            <span class="chip">PR ${safeText(item.pr_state, 'unknown')}</span>
+            <span class="chip">checks ${safeText(item.checks_state, 'unknown')}</span>
+            ${item.attention_count ? `<span class="chip ${safeText(item.attention_severity)}">${safeText(item.attention_severity)} attention ${safeText(item.attention_count)}</span>` : ''}
+            ${(item.deployments || []).length ? `<span class="chip">deploy ${safeText((item.deployments || []).map(target => target.provider).join(', '))}</span>` : ''}
           </div>
         </div>
       `).join('');
@@ -575,16 +580,16 @@
       const response = await fetch(`/api/projects/${projectId}`);
       const project = await response.json();
       const aliases = (project.aliases || [])
-        .map(alias => `<span class="chip">${alias.alias_type}: ${alias.alias_value}</span>`)
+        .map(alias => `<span class="chip">${safeText(alias.alias_type)}: ${safeText(alias.alias_value)}</span>`)
         .join('');
       const attention = (project.attention || [])
         .map(issue => `
           <div class="item">
-            <strong>${issue.title}</strong><br>
-            <span class="meta">${issue.detail}</span>
+            <strong>${safeText(issue.title)}</strong><br>
+            <span class="meta">${safeText(issue.detail)}</span>
             <div class="chips">
-              <span class="chip ${issue.severity}">${issue.severity}</span>
-              <span class="chip">${issue.type}</span>
+              <span class="chip ${safeText(issue.severity)}">${safeText(issue.severity)}</span>
+              <span class="chip">${safeText(issue.type)}</span>
             </div>
           </div>
         `)
@@ -592,19 +597,19 @@
       const related = (project.related_candidates || [])
         .map(candidate => `
           <div class="item">
-            <strong>${candidate.display_name}</strong><br>
-            <span class="meta">${candidate.source} - ${candidate.review_status} - confidence ${candidate.confidence}</span>
+            <strong>${safeText(candidate.display_name)}</strong><br>
+            <span class="meta">${safeText(candidate.source)} - ${safeText(candidate.review_status)} - confidence ${safeText(candidate.confidence)}</span>
           </div>
         `)
         .join('');
       const deployments = (project.deployments || [])
         .map(target => `
           <div class="item">
-            <strong>${target.provider}</strong> - ${target.environment}<br>
-            <span class="meta">state ${target.state}</span><br>
-            <span class="meta">marker ${target.marker || 'unknown'}</span><br>
-            <span class="meta">${target.runnable ? `command ${target.command}` : 'manual management only from this machine'}</span>
-            ${target.url ? `<br><span class="meta">${target.url}</span>` : ''}
+            <strong>${safeText(target.provider)}</strong> - ${safeText(target.environment)}<br>
+            <span class="meta">state ${safeText(target.state)}</span><br>
+            <span class="meta">marker ${safeText(target.marker, 'unknown')}</span><br>
+            <span class="meta">${target.runnable ? `command ${safeText(target.command)}` : 'manual management only from this machine'}</span>
+            ${target.url ? `<br><span class="meta">${safeText(target.url)}</span>` : ''}
           </div>
         `)
         .join('');
@@ -613,11 +618,11 @@
         ? `
           <div class="item">
             <strong>Repo Snapshot</strong><br>
-            <div class="meta">Branch: ${project.repo_snapshot.branch || 'unknown'}</div>
-            <div class="meta">Last commit: ${project.repo_snapshot.last_commit_at || 'unknown'}</div>
-            <div class="meta">Remote: ${project.repo_snapshot.remote_name || 'unknown'}</div>
+            <div class="meta">Branch: ${safeText(project.repo_snapshot.branch, 'unknown')}</div>
+            <div class="meta">Last commit: ${safeText(project.repo_snapshot.last_commit_at, 'unknown')}</div>
+            <div class="meta">Remote: ${safeText(project.repo_snapshot.remote_name, 'unknown')}</div>
             <div class="meta">Dirty: ${project.repo_snapshot.has_uncommitted_changes ? 'yes' : 'no'}</div>
-            <div class="meta">Synced: ${project.repo_snapshot.synced_at || 'unknown'}</div>
+            <div class="meta">Synced: ${safeText(project.repo_snapshot.synced_at, 'unknown')}</div>
           </div>
         `
         : '<p>No repo snapshot yet.</p>';
@@ -626,11 +631,11 @@
           <div class="item">
             <div class="item-header">
               <div>
-                <strong>${run.agent_type}</strong> - ${run.skill_name}<br>
-                <span class="meta">${run.status} - ${run.started_at}</span><br>
-                <span class="meta">${run.cwd}</span><br>
-                <span class="meta">${run.output_summary || 'No summary yet'}</span><br>
-                <span class="meta">log ${run.log_path || 'n/a'}</span>
+                <strong>${safeText(run.agent_type)}</strong> - ${safeText(run.skill_name)}<br>
+                <span class="meta">${safeText(run.status)} - ${safeText(run.started_at)}</span><br>
+                <span class="meta">${safeText(run.cwd)}</span><br>
+                <span class="meta">${safeText(run.output_summary, 'No summary yet')}</span><br>
+                <span class="meta">log ${safeText(run.log_path, 'n/a')}</span>
               </div>
               <div class="actions" style="margin-top:0">
                 <button class="btn secondary" onclick="viewRunLog(${run.id})">Log</button>
@@ -643,19 +648,19 @@
         `)
         .join('');
       const skillOptions = skills
-        .map(skill => `<option value="${skill.name}">${skill.name}</option>`)
+        .map(skill => `<option value="${safeText(skill.name)}">${safeText(skill.name)}</option>`)
         .join('');
       const defaultSkill = skills[0]?.name || 'office-hours';
       const defaultCommand = buildDefaultCommand('codex', defaultSkill, project.primary_local_path || '');
 
       document.getElementById('project-detail').innerHTML = `
         <div class="item">
-          <strong>${project.display_name}</strong><br>
-          <div class="meta">Owner: ${project.owner || 'unknown'}</div>
-          <div class="meta">Status: ${project.status}</div>
-          <div class="meta">Path: ${project.primary_local_path || 'unknown'}</div>
-          <div class="meta">Remote: ${project.remote_url || 'unknown'}</div>
-          <div class="meta">Default branch: ${project.default_branch || 'unknown'}</div>
+          <strong>${safeText(project.display_name)}</strong><br>
+          <div class="meta">Owner: ${safeText(project.owner, 'unknown')}</div>
+          <div class="meta">Status: ${safeText(project.status)}</div>
+          <div class="meta">Path: ${safeText(project.primary_local_path, 'unknown')}</div>
+          <div class="meta">Remote: ${safeText(project.remote_url, 'unknown')}</div>
+          <div class="meta">Default branch: ${safeText(project.default_branch, 'unknown')}</div>
         </div>
         ${snapshot}
         <div class="item">
@@ -717,9 +722,9 @@
           <strong>Recent Agent Activity</strong>
           ${(project.recent_events || []).map(event => `
             <div class="item">
-              <strong>${event.source}</strong> - ${event.event_type}<br>
-              <span class="meta">${event.occurred_at}</span><br>
-              <span class="meta">${event.summary || 'No summary'}</span>
+              <strong>${safeText(event.source)}</strong> - ${safeText(event.event_type)}<br>
+              <span class="meta">${safeText(event.occurred_at)}</span><br>
+              <span class="meta">${safeText(event.summary, 'No summary')}</span>
             </div>
           `).join('') || '<p>No recent agent activity recorded.</p>'}
         </div>
