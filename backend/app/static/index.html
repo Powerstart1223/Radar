@@ -289,6 +289,7 @@
           <select id="operations-view">
             <option value="runs">Runs</option>
             <option value="deployments">Deployments</option>
+            <option value="releases">Releases</option>
           </select>
         </div>
         <div>
@@ -341,6 +342,7 @@
     let skills = [];
     let operationsRuns = [];
     let operationsDeployments = [];
+    let operationsReleases = [];
     const deploymentHistoryCache = {};
     let selectedReleaseDetails = null;
 
@@ -454,6 +456,14 @@
       return String(item.state || '') === 'failed';
     }
 
+    function isActiveRelease(item) {
+      return ['queued', 'running', 'cancelling'].includes(String(item.state || ''));
+    }
+
+    function isFailedRelease(item) {
+      return String(item.state || '') === 'failed';
+    }
+
     function renderOperationsBoard() {
       const view = document.getElementById('operations-view')?.value || 'runs';
       const filter = document.getElementById('operations-filter')?.value || 'all';
@@ -462,7 +472,9 @@
         return;
       }
 
-      const items = view === 'deployments' ? operationsDeployments : operationsRuns;
+      const items = view === 'deployments'
+        ? operationsDeployments
+        : (view === 'releases' ? operationsReleases : operationsRuns);
       const filtered = items.filter(item => {
         if (filter === 'all') {
           return true;
@@ -473,6 +485,18 @@
           }
           if (filter === 'failed') {
             return isFailedRun(item);
+          }
+          if (filter === 'manual') {
+            return false;
+          }
+          return true;
+        }
+        if (view === 'releases') {
+          if (filter === 'active') {
+            return isActiveRelease(item);
+          }
+          if (filter === 'failed') {
+            return isFailedRelease(item);
           }
           if (filter === 'manual') {
             return false;
@@ -507,6 +531,32 @@
                 <span class="meta">${safeText(item.output_summary, 'No summary yet')}</span>
               </div>
               ${item.project_id ? `<button class="btn secondary" onclick="selectProject(${item.project_id})">Open Project</button>` : ''}
+            </div>
+          </div>
+        `).join('');
+        return;
+      }
+
+      if (view === 'releases') {
+        container.innerHTML = filtered.map(item => `
+          <div class="item">
+            <div class="item-header">
+              <div>
+                <strong>${safeText(item.display_name, 'Unknown project')}</strong><br>
+                <span class="meta">${safeText(item.provider)} - ${safeText(item.environment || 'production')}</span><br>
+                ${item.service_name ? `<span class="meta">service ${safeText(item.service_name)}</span><br>` : ''}
+                <span class="meta">state ${safeText(item.state || item.raw_state || 'unknown')}</span><br>
+                ${item.updated_at ? `<span class="meta">updated ${safeText(item.updated_at)}</span><br>` : ''}
+                <span class="meta">${safeText(item.summary, 'No summary')}</span>
+                ${item.url ? `<br><span class="meta">${safeText(item.url)}</span>` : ''}
+                ${item.is_current ? `<br><span class="meta">current deployment</span>` : ''}
+              </div>
+              <div class="actions" style="margin-top:0">
+                ${item.project_id ? `<button class="btn secondary" onclick="selectProject(${item.project_id})">Open Project</button>` : ''}
+                <button class="btn secondary" onclick="showGlobalReleaseDetails('${escapeHtml(item.provider)}', '${escapeHtml(item.deploy_id || '')}', ${item.project_id})">Details</button>
+                ${(item.actions || []).map(action => `<button class="btn secondary" onclick="runDeploymentAction(${item.project_id}, '${escapeHtml(item.provider)}', '${escapeHtml(action.id)}', '${escapeHtml(item.deploy_id || '')}')">${safeText(action.label)}</button>`).join('')}
+                ${item.management_url ? `<button class="btn secondary" onclick="openExternal('${escapeHtml(item.management_url)}')">Manage</button>` : ''}
+              </div>
             </div>
           </div>
         `).join('');
@@ -623,15 +673,49 @@
       }
     }
 
+    function showGlobalReleaseDetails(provider, deployId, projectId) {
+      const entry = (operationsReleases || []).find(item =>
+        String(item.project_id || '') === String(projectId || '') &&
+        String(item.provider || '') === String(provider || '') &&
+        String(item.deploy_id || '') === String(deployId || '')
+      );
+      if (!entry) {
+        return;
+      }
+      selectedReleaseDetails = entry;
+      const subtitle = document.getElementById('release-modal-subtitle');
+      const body = document.getElementById('release-modal-body');
+      const modal = document.getElementById('release-modal');
+      if (!subtitle || !body || !modal) {
+        return;
+      }
+      subtitle.textContent = `${provider} ${deployId}`;
+      const details = entry.details || {};
+      const rows = Object.entries(details)
+        .filter(([, value]) => value !== null && value !== undefined && value !== '')
+        .map(([key, value]) => `
+          <div class="item">
+            <strong>${safeText(key.replaceAll('_', ' '))}</strong><br>
+            <span class="meta">${safeText(value)}</span>
+          </div>
+        `)
+        .join('');
+      body.innerHTML = rows || '<p>No release details available.</p>';
+      modal.classList.add('open');
+    }
+
     async function loadOperationsBoard() {
-      const [runsResponse, deploymentsResponse] = await Promise.all([
+      const [runsResponse, deploymentsResponse, releasesResponse] = await Promise.all([
         fetch('/api/runs'),
-        fetch('/api/deployments')
+        fetch('/api/deployments'),
+        fetch('/api/releases')
       ]);
       const runsData = await runsResponse.json();
       const deploymentsData = await deploymentsResponse.json();
+      const releasesData = await releasesResponse.json();
       operationsRuns = runsData.items || [];
       operationsDeployments = deploymentsData.items || [];
+      operationsReleases = releasesData.items || [];
       renderOperationsBoard();
     }
 

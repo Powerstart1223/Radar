@@ -47,6 +47,10 @@ def build_router(
     def list_deployments() -> dict:
         return {"items": projects.list_deployments()}
 
+    @router.get("/api/releases")
+    def list_releases(limit: int = Query(default=30, ge=1, le=100)) -> dict:
+        return {"items": projects.list_recent_releases(limit=limit)}
+
     @router.get("/api/projects/{project_id}")
     def get_project(project_id: int) -> dict:
         project = projects.get_project(project_id)

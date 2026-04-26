@@ -238,6 +238,46 @@ class ProjectService:
             ),
         )
 
+    def list_recent_releases(self, *, limit: int = 30, per_deployment_limit: int = 3) -> list[dict]:
+        releases: list[dict] = []
+        for project in self.list_projects():
+            for target in project.get("deployments", []):
+                if not target.get("history_supported"):
+                    continue
+                provider = str(target.get("provider") or "").strip().lower()
+                try:
+                    history = self.list_deployment_history(
+                        int(project["id"]),
+                        provider,
+                        limit=per_deployment_limit,
+                    ).get("items", [])
+                except RuntimeError:
+                    continue
+                except ValueError:
+                    continue
+                for entry in history:
+                    releases.append(
+                        {
+                            "project_id": project["id"],
+                            "display_name": project["display_name"],
+                            "provider": provider,
+                            "environment": target.get("environment"),
+                            "service_name": target.get("service_name"),
+                            "management_url": target.get("management_url"),
+                            "deploy_id": entry.get("deploy_id"),
+                            "state": entry.get("state"),
+                            "raw_state": entry.get("raw_state"),
+                            "updated_at": entry.get("updated_at"),
+                            "url": entry.get("url"),
+                            "summary": entry.get("summary"),
+                            "is_current": entry.get("is_current"),
+                            "details": entry.get("details") or {},
+                            "actions": entry.get("actions") or [],
+                        }
+                    )
+        releases.sort(key=lambda item: str(item.get("updated_at") or ""), reverse=True)
+        return releases[:limit]
+
     def refresh_project_repo(self, project_id: int) -> dict:
         with self.db.connect() as conn:
             project = conn.execute(

@@ -440,6 +440,83 @@ class ProjectServiceDeploymentTests(unittest.TestCase):
         self.assertEqual(result["items"][0]["details"]["checks"], "succeeded")
         self.assertIn("safety_note", result["items"][0]["details"])
 
+    def test_list_recent_releases_aggregates_projects(self) -> None:
+        self.service = ProjectService(self.db, self.settings)
+
+        with patch.object(
+            self.service,
+            "list_projects",
+            return_value=[
+                {
+                    "id": 1,
+                    "display_name": "Radar",
+                    "deployments": [
+                        {
+                            "provider": "netlify",
+                            "environment": "production",
+                            "service_name": "radar-site",
+                            "management_url": "https://app.netlify.com/sites/radar-site",
+                            "history_supported": True,
+                        }
+                    ],
+                },
+                {
+                    "id": 2,
+                    "display_name": "Control",
+                    "deployments": [
+                        {
+                            "provider": "render",
+                            "environment": "production",
+                            "service_name": "control-web",
+                            "management_url": "https://dashboard.render.com/web/srv-1",
+                            "history_supported": True,
+                        }
+                    ],
+                },
+            ],
+        ), patch.object(
+            self.service,
+            "list_deployment_history",
+            side_effect=[
+                {
+                    "items": [
+                        {
+                            "deploy_id": "n-1",
+                            "state": "finished",
+                            "raw_state": "ready",
+                            "updated_at": "2026-04-26T23:00:00Z",
+                            "url": "https://radar-site.netlify.app",
+                            "summary": "production",
+                            "is_current": True,
+                            "details": {"provider": "netlify"},
+                            "actions": [],
+                        }
+                    ]
+                },
+                {
+                    "items": [
+                        {
+                            "deploy_id": "r-1",
+                            "state": "running",
+                            "raw_state": "build_in_progress",
+                            "updated_at": "2026-04-26T22:30:00Z",
+                            "url": "",
+                            "summary": "deploy",
+                            "is_current": True,
+                            "details": {"provider": "render"},
+                            "actions": [],
+                        }
+                    ]
+                },
+            ],
+        ):
+            result = self.service.list_recent_releases(limit=10)
+
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0]["project_id"], 1)
+        self.assertEqual(result[0]["deploy_id"], "n-1")
+        self.assertEqual(result[1]["project_id"], 2)
+
 
 if __name__ == "__main__":
     unittest.main()
