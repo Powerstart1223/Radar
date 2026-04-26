@@ -78,6 +78,13 @@ def build_router(
         run_id = runs.queue_run(payload)
         return {"run_id": run_id, "status": "queued", "provider": payload["skill_name"].split(":", 1)[1]}
 
+    @router.post("/api/projects/{project_id}/deployments/{provider}/actions/{action_id}")
+    def perform_deployment_action(project_id: int, provider: str, action_id: str) -> dict:
+        try:
+            return projects.perform_deployment_action(project_id, provider, action_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     @router.get("/api/discovery/candidates")
     def list_candidates() -> dict:
         return {"items": discovery.list_candidates()}

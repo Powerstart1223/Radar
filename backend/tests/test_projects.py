@@ -225,6 +225,80 @@ class ProjectServiceDeploymentTests(unittest.TestCase):
         self.assertIn("metadata is unavailable", target["availability_reason"])
         self.assertIn("bad token", target["availability_reason"])
 
+    def test_perform_render_trigger_action(self) -> None:
+        self.settings = Settings(
+            app_name="Project Radar",
+            app_host="127.0.0.1",
+            app_port=8787,
+            base_dir=self.base_dir,
+            storage_dir=self.base_dir / "storage",
+            artifacts_dir=self.base_dir / "storage" / "artifacts",
+            logs_dir=self.base_dir / "storage" / "logs",
+            db_path=self.base_dir / "project_radar.db",
+            codex_sessions_root=self.base_dir / "codex",
+            openclaw_sessions_root=self.base_dir / "openclaw",
+            github_token="",
+            vercel_token="",
+            netlify_token="",
+            render_token="render-token",
+        )
+        self.service = ProjectService(self.db, self.settings)
+
+        with patch.object(
+            self.service,
+            "get_project",
+            return_value={"deployments": [{"provider": "render", "service_id": "srv-123"}]},
+        ), patch.object(
+            self.service,
+            "_http_json",
+            return_value={"id": "dep-123"},
+        ), patch.object(self.service, "_mark_deploy_state") as mark_state:
+            result = self.service.perform_deployment_action(5, "render", "trigger_api_deploy")
+
+        self.assertEqual(result["status"], "queued")
+        self.assertEqual(result["deploy_id"], "dep-123")
+        mark_state.assert_called_once_with(5, provider="render", state="queued")
+
+    def test_perform_netlify_restore_action(self) -> None:
+        self.settings = Settings(
+            app_name="Project Radar",
+            app_host="127.0.0.1",
+            app_port=8787,
+            base_dir=self.base_dir,
+            storage_dir=self.base_dir / "storage",
+            artifacts_dir=self.base_dir / "storage" / "artifacts",
+            logs_dir=self.base_dir / "storage" / "logs",
+            db_path=self.base_dir / "project_radar.db",
+            codex_sessions_root=self.base_dir / "codex",
+            openclaw_sessions_root=self.base_dir / "openclaw",
+            github_token="",
+            vercel_token="",
+            netlify_token="netlify-token",
+            render_token="",
+        )
+        self.service = ProjectService(self.db, self.settings)
+
+        with patch.object(
+            self.service,
+            "get_project",
+            return_value={"deployments": [{"provider": "netlify", "site_id": "site-123", "deploy_id": "current-1"}]},
+        ), patch.object(
+            self.service,
+            "_http_json",
+            side_effect=[
+                [
+                    {"id": "current-1", "state": "current"},
+                    {"id": "old-2", "state": "old"},
+                ],
+                {"id": "old-2"},
+            ],
+        ), patch.object(self.service, "_mark_deploy_state") as mark_state:
+            result = self.service.perform_deployment_action(7, "netlify", "restore_previous_deploy")
+
+        self.assertEqual(result["status"], "running")
+        self.assertEqual(result["deploy_id"], "old-2")
+        mark_state.assert_called_once_with(7, provider="netlify", state="running")
+
 
 if __name__ == "__main__":
     unittest.main()

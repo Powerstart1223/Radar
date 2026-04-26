@@ -491,6 +491,7 @@
             <div class="actions" style="margin-top:0">
               ${item.project_id ? `<button class="btn secondary" onclick="selectProject(${item.project_id})">Open Project</button>` : ''}
               ${item.project_id && item.runnable ? `<button class="btn secondary" onclick="deployProject(${item.project_id})">Deploy</button>` : ''}
+              ${(item.actions || []).map(action => `<button class="btn secondary" onclick="runDeploymentAction(${item.project_id}, '${escapeHtml(item.provider)}', '${escapeHtml(action.id)}')">${safeText(action.label)}</button>`).join('')}
               ${item.management_url ? `<button class="btn secondary" onclick="openExternal('${escapeHtml(item.management_url)}')">Manage</button>` : ''}
             </div>
           </div>
@@ -622,6 +623,7 @@
               </div>
               <div class="actions" style="margin-top:0">
                 ${target.runnable ? `<button class="btn secondary" onclick="deployProject(${project.id})">Deploy</button>` : ''}
+                ${(target.actions || []).map(action => `<button class="btn secondary" onclick="runDeploymentAction(${project.id}, '${escapeHtml(target.provider)}', '${escapeHtml(action.id)}')">${safeText(action.label)}</button>`).join('')}
                 ${target.management_url ? `<button class="btn secondary" onclick="openExternal('${escapeHtml(target.management_url)}')">Manage</button>` : ''}
               </div>
             </div>
@@ -870,6 +872,16 @@
 
     async function deployProject(projectId) {
       const response = await fetch(`/api/projects/${projectId}/deploy`, {
+        method: 'POST'
+      });
+      const data = await response.json();
+      await loadStatus();
+      await loadProjectDetail(projectId);
+      document.getElementById('status-json').textContent = JSON.stringify(data, null, 2);
+    }
+
+    async function runDeploymentAction(projectId, provider, actionId) {
+      const response = await fetch(`/api/projects/${projectId}/deployments/${encodeURIComponent(provider)}/actions/${encodeURIComponent(actionId)}`, {
         method: 'POST'
       });
       const data = await response.json();

@@ -226,6 +226,7 @@ class ProjectService:
                         "service_name": target.get("service_name"),
                         "management_url": target.get("management_url"),
                         "availability_reason": target.get("availability_reason"),
+                        "actions": target.get("actions") or [],
                     }
                 )
         return sorted(
@@ -297,6 +298,29 @@ class ProjectService:
             "skill_name": f"deploy:{provider}",
             "cwd": cwd,
         }
+
+    def perform_deployment_action(self, project_id: int, provider: str, action_id: str) -> dict:
+        project = self.get_project(project_id)
+        if project is None:
+            raise ValueError("Project not found")
+
+        deployment = next(
+            (
+                item for item in (project.get("deployments") or [])
+                if str(item.get("provider") or "").strip().lower() == provider.strip().lower()
+            ),
+            None,
+        )
+        if deployment is None:
+            raise ValueError(f"Deployment provider not found for project: {provider}")
+
+        normalized_provider = provider.strip().lower()
+        normalized_action = action_id.strip().lower()
+        if normalized_provider == "render" and normalized_action == "trigger_api_deploy":
+            return self._perform_render_trigger(project_id=project_id, deployment=deployment)
+        if normalized_provider == "netlify" and normalized_action == "restore_previous_deploy":
+            return self._perform_netlify_restore(project_id=project_id, deployment=deployment)
+        raise ValueError(f"Unsupported deployment action: {provider}/{action_id}")
 
     def sync_codex_activity(self) -> dict:
         return self._sync_agent_activity(source="codex", sessions_root=self.settings.codex_sessions_root, glob_pattern="*.jsonl")
@@ -774,6 +798,7 @@ class ProjectService:
                 }
             if live_data:
                 item.update({key: value for key, value in live_data.items() if value not in {None, ""}})
+            item["actions"] = self._deployment_actions(item)
             enriched.append(item)
         return enriched
 
@@ -867,6 +892,8 @@ class ProjectService:
             "url": deploy_url,
             "management_url": admin_url or deployment.get("management_url"),
             "service_name": str(latest.get("name") or deployment.get("service_name") or "").strip(),
+            "site_id": site_id,
+            "deploy_id": str(latest.get("id") or "").strip(),
             "availability_reason": self._compose_live_deployment_reason(
                 provider="netlify",
                 state=live_state,
@@ -932,6 +959,8 @@ class ProjectService:
             "url": service_url or deployment.get("url"),
             "management_url": dashboard_url,
             "service_name": str(matched.get("name") or service_name),
+            "service_id": service_id,
+            "deploy_id": str(latest.get("id") or "").strip(),
             "availability_reason": self._compose_live_deployment_reason(
                 provider="render",
                 state=live_state,
@@ -982,6 +1011,96 @@ class ProjectService:
         if detail:
             parts.append(f"({detail})")
         return " ".join(parts) + "."
+
+    def _deployment_actions(self, deployment: dict) -> list[dict]:
+        provider = str(deployment.get("provider") or "").strip().lower()
+        actions: list[dict] = []
+        if provider == "render" and self.settings.render_token and deployment.get("service_id"):
+            actions.append({"id": "trigger_api_deploy", "label": "Deploy"})
+        if provider == "netlify" and self.settings.netlify_token and deployment.get("site_id"):
+            actions.append({"id": "restore_previous_deploy", "label": "Rollback"})
+        return actions
+
+    def _perform_render_trigger(self, *, project_id: int, deployment: dict) -> dict:
+        if not self.settings.render_token:
+            raise ValueError("PROJECT_RADAR_RENDER_TOKEN is not configured")
+        service_id = str(deployment.get("service_id") or "").strip()
+        if not service_id:
+            raise ValueError("Render service ID is unavailable for this project")
+
+        payload = self._http_json(
+            url=f"https://api.render.com/v1/services/{urllib.parse.quote(service_id, safe='')}/deploys",
+            headers={
+                "Authorization": f"Bearer {self.settings.render_token}",
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+            body={"clearCache": "do_not_clear"},
+        )
+        deploy_id = str(payload.get("id") or payload.get("deployId") or "").strip() if isinstance(payload, dict) else ""
+        self._mark_deploy_state(project_id, provider="render", state="queued")
+        return {
+            "project_id": project_id,
+            "provider": "render",
+            "action": "trigger_api_deploy",
+            "status": "queued",
+            "deploy_id": deploy_id,
+        }
+
+    def _perform_netlify_restore(self, *, project_id: int, deployment: dict) -> dict:
+        if not self.settings.netlify_token:
+            raise ValueError("PROJECT_RADAR_NETLIFY_TOKEN is not configured")
+        site_id = str(deployment.get("site_id") or "").strip()
+        current_deploy_id = str(deployment.get("deploy_id") or "").strip()
+        if not site_id:
+            raise ValueError("Netlify site ID is unavailable for this project")
+
+        payload = self._http_json(
+            url=f"https://api.netlify.com/api/v1/sites/{urllib.parse.quote(site_id, safe='')}/deploys",
+            headers={
+                "Authorization": f"Bearer {self.settings.netlify_token}",
+                "Accept": "application/json",
+            },
+        )
+        if not isinstance(payload, list) or not payload:
+            raise ValueError("No Netlify deploy history is available for rollback")
+
+        rollback_target = next(
+            (
+                item for item in payload
+                if isinstance(item, dict)
+                and str(item.get("id") or "").strip()
+                and str(item.get("id") or "").strip() != current_deploy_id
+                and str(item.get("state") or "").strip().lower() in {"old", "ready", "current", "published"}
+            ),
+            None,
+        )
+        if rollback_target is None:
+            raise ValueError("No previous Netlify deploy is available for rollback")
+
+        restore_deploy_id = str(rollback_target.get("id") or "").strip()
+        response = self._http_json(
+            url=(
+                f"https://api.netlify.com/api/v1/sites/{urllib.parse.quote(site_id, safe='')}"
+                f"/deploys/{urllib.parse.quote(restore_deploy_id, safe='')}/restore"
+            ),
+            headers={
+                "Authorization": f"Bearer {self.settings.netlify_token}",
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        restored_id = str(response.get("id") or restore_deploy_id).strip() if isinstance(response, dict) else restore_deploy_id
+        self._mark_deploy_state(project_id, provider="netlify", state="running")
+        return {
+            "project_id": project_id,
+            "provider": "netlify",
+            "action": "restore_previous_deploy",
+            "status": "running",
+            "deploy_id": restored_id,
+        }
 
     def _deployment_api_error_reason(self, *, provider: str, fallback_reason: str, error: str) -> str:
         prefix = f"Latest {provider} deployment metadata is unavailable"
@@ -1081,8 +1200,18 @@ class ProjectService:
         except OSError:
             return ""
 
-    def _http_json(self, *, url: str, headers: dict[str, str]) -> dict | list:
-        request = urllib.request.Request(url, headers=headers)
+    def _http_json(
+        self,
+        *,
+        url: str,
+        headers: dict[str, str],
+        method: str = "GET",
+        body: dict | list | None = None,
+    ) -> dict | list:
+        data = None
+        if body is not None:
+            data = json.dumps(body).encode("utf-8")
+        request = urllib.request.Request(url, headers=headers, method=method, data=data)
         try:
             with urllib.request.urlopen(request, timeout=20) as response:
                 return json.loads(response.read().decode("utf-8"))
