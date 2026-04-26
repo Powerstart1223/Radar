@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
-import subprocess
+import re
 import shutil
+import subprocess
+import tomllib
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -214,6 +216,9 @@ class ProjectService:
                         "marker": target.get("marker"),
                         "command": target.get("command"),
                         "runnable": target.get("runnable"),
+                        "service_name": target.get("service_name"),
+                        "management_url": target.get("management_url"),
+                        "availability_reason": target.get("availability_reason"),
                     }
                 )
         return sorted(
@@ -664,14 +669,34 @@ class ProjectService:
                 continue
             command = str(spec["command"])
             executable = command.split(" ", 1)[0] if command else ""
+            runnable = bool(executable and shutil.which(executable))
+            service_name = self._detect_provider_service_name(
+                provider=str(spec["provider"]),
+                repo_path=repo_path,
+                marker=matched_marker,
+            )
+            management_url = self._detect_provider_management_url(
+                provider=str(spec["provider"]),
+                repo_path=repo_path,
+                marker=matched_marker,
+                service_name=service_name,
+            )
             targets.append(
                 {
                     "provider": spec["provider"],
                     "environment": spec["environment"],
                     "marker": matched_marker,
                     "command": command,
-                    "runnable": bool(executable and shutil.which(executable)),
-                    "state": "available" if executable and shutil.which(executable) else "manual",
+                    "runnable": runnable,
+                    "state": "available" if runnable else "manual",
+                    "service_name": service_name,
+                    "management_url": management_url,
+                    "availability_reason": self._deployment_availability_reason(
+                        provider=str(spec["provider"]),
+                        runnable=runnable,
+                        command=command,
+                        management_url=management_url,
+                    ),
                 }
             )
         return targets
@@ -697,6 +722,9 @@ class ProjectService:
                     "marker": detected.get("marker") if detected else "",
                     "command": detected.get("command") if detected else "",
                     "runnable": bool(detected and detected.get("runnable")),
+                    "service_name": detected.get("service_name") if detected else "",
+                    "management_url": detected.get("management_url") if detected else "",
+                    "availability_reason": detected.get("availability_reason") if detected else "",
                 }
             )
         for detected in detected_by_key.values():
@@ -710,9 +738,94 @@ class ProjectService:
                     "marker": detected["marker"],
                     "command": detected["command"],
                     "runnable": detected["runnable"],
+                    "service_name": detected.get("service_name"),
+                    "management_url": detected.get("management_url"),
+                    "availability_reason": detected.get("availability_reason"),
                 }
             )
         return sorted(merged, key=lambda item: (str(item["provider"]), str(item["environment"])))
+
+    def _detect_provider_service_name(self, *, provider: str, repo_path: Path, marker: str) -> str:
+        if provider == "fly":
+            config = self._read_toml_file(repo_path / marker)
+            value = config.get("app")
+            return str(value).strip() if value else ""
+        if provider == "render":
+            raw = self._read_text_file(repo_path / marker)
+            match = re.search(r"^\s*name:\s*['\"]?([^'\"\n]+)['\"]?\s*$", raw, flags=re.MULTILINE)
+            return match.group(1).strip() if match else ""
+        if provider == "vercel" and marker == ".vercel/project.json":
+            config = self._read_json_file(repo_path / marker)
+            for key in ("projectName", "name", "projectId"):
+                value = config.get(key)
+                if value:
+                    return str(value).strip()
+        return ""
+
+    def _detect_provider_management_url(
+        self,
+        *,
+        provider: str,
+        repo_path: Path,
+        marker: str,
+        service_name: str,
+    ) -> str:
+        if provider == "fly":
+            return f"https://fly.io/apps/{service_name}" if service_name else "https://fly.io/dashboard"
+        if provider == "netlify":
+            return "https://app.netlify.com/"
+        if provider == "railway":
+            return "https://railway.app/dashboard"
+        if provider == "render":
+            return "https://dashboard.render.com/"
+        if provider == "vercel":
+            if marker == ".vercel/project.json":
+                config = self._read_json_file(repo_path / marker)
+                org_value = str(config.get("orgId") or "").strip()
+                project_value = str(config.get("projectId") or "").strip()
+                if org_value and project_value:
+                    return f"https://vercel.com/{org_value}/{project_value}"
+            return "https://vercel.com/dashboard"
+        return ""
+
+    def _deployment_availability_reason(
+        self,
+        *,
+        provider: str,
+        runnable: bool,
+        command: str,
+        management_url: str,
+    ) -> str:
+        if runnable:
+            return f"Runnable locally via {command}."
+        if command:
+            executable = command.split(" ", 1)[0]
+            return f"{provider} is configured, but {executable} is not available on PATH."
+        if management_url:
+            return f"{provider} is configured for manual management through its provider console."
+        return f"{provider} is configured, but this machine cannot deploy it directly."
+
+    def _read_json_file(self, path: Path) -> dict:
+        try:
+            with path.open("r", encoding="utf-8") as handle:
+                data = json.load(handle)
+        except (OSError, json.JSONDecodeError):
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def _read_toml_file(self, path: Path) -> dict:
+        try:
+            with path.open("rb") as handle:
+                data = tomllib.load(handle)
+        except (OSError, tomllib.TOMLDecodeError):
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def _read_text_file(self, path: Path) -> str:
+        try:
+            return path.read_text(encoding="utf-8")
+        except OSError:
+            return ""
 
     def _sync_agent_activity(self, *, source: str, sessions_root: Path, glob_pattern: str) -> dict:
         if not sessions_root.exists():

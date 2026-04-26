@@ -11,7 +11,8 @@ This current build includes:
 - real discovery from git repos plus Codex/OpenClaw session stores
 - project review, repo refresh, GitHub sync, and attention queues
 - agent run queueing with logs per project
-- deployment target detection for common providers and one-click deploy when a local provider CLI is available
+- deployment target detection for common providers, provider console links, and one-click deploy when a local provider CLI is available
+- portfolio operations board for runs and deployments across all projects
 - local HTML shell at `/`
 
 ## Run locally
@@ -30,6 +31,6 @@ http://127.0.0.1:8787
 
 ## Next build steps
 
-1. Add safer structured execution for queued runs instead of editable raw shell commands.
+1. Persist provider-specific deployment URLs and last-known release metadata from live APIs where credentials are available.
 2. Expand deployment adapters beyond the current file-marker providers.
-3. Add broader portfolio views for agent runs and deployment history.
+3. Add richer deploy history and release drill-downs across the portfolio.

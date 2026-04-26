@@ -483,11 +483,13 @@
               <strong>${safeText(item.display_name, 'Unknown project')}</strong><br>
               <span class="meta">${safeText(item.provider)} - ${safeText(item.environment)}</span><br>
               <span class="meta">state ${safeText(item.state)}</span><br>
-              <span class="meta">${item.runnable ? `command ${safeText(item.command)}` : 'manual management only from this machine'}</span>
+              ${item.service_name ? `<span class="meta">service ${safeText(item.service_name)}</span><br>` : ''}
+              <span class="meta">${safeText(item.availability_reason, item.runnable ? `Runnable locally via ${item.command || 'configured command'}.` : 'Manual management only from this machine.')}</span>
             </div>
             <div class="actions" style="margin-top:0">
               ${item.project_id ? `<button class="btn secondary" onclick="selectProject(${item.project_id})">Open Project</button>` : ''}
               ${item.project_id && item.runnable ? `<button class="btn secondary" onclick="deployProject(${item.project_id})">Deploy</button>` : ''}
+              ${item.management_url ? `<button class="btn secondary" onclick="openExternal('${escapeHtml(item.management_url)}')">Manage</button>` : ''}
             </div>
           </div>
         </div>
@@ -605,11 +607,21 @@
       const deployments = (project.deployments || [])
         .map(target => `
           <div class="item">
-            <strong>${safeText(target.provider)}</strong> - ${safeText(target.environment)}<br>
-            <span class="meta">state ${safeText(target.state)}</span><br>
-            <span class="meta">marker ${safeText(target.marker, 'unknown')}</span><br>
-            <span class="meta">${target.runnable ? `command ${safeText(target.command)}` : 'manual management only from this machine'}</span>
-            ${target.url ? `<br><span class="meta">${safeText(target.url)}</span>` : ''}
+            <div class="item-header">
+              <div>
+                <strong>${safeText(target.provider)}</strong> - ${safeText(target.environment)}<br>
+                ${target.service_name ? `<span class="meta">service ${safeText(target.service_name)}</span><br>` : ''}
+                <span class="meta">state ${safeText(target.state)}</span><br>
+                <span class="meta">marker ${safeText(target.marker, 'unknown')}</span><br>
+                <span class="meta">${safeText(target.availability_reason, target.runnable ? `Runnable locally via ${target.command || 'configured command'}.` : 'Manual management only from this machine.')}</span>
+                ${target.url ? `<br><span class="meta">${safeText(target.url)}</span>` : ''}
+                ${target.management_url ? `<br><span class="meta">${safeText(target.management_url)}</span>` : ''}
+              </div>
+              <div class="actions" style="margin-top:0">
+                ${target.runnable ? `<button class="btn secondary" onclick="deployProject(${project.id})">Deploy</button>` : ''}
+                ${target.management_url ? `<button class="btn secondary" onclick="openExternal('${escapeHtml(target.management_url)}')">Manage</button>` : ''}
+              </div>
+            </div>
           </div>
         `)
         .join('');
@@ -861,6 +873,13 @@
       await loadStatus();
       await loadProjectDetail(projectId);
       document.getElementById('status-json').textContent = JSON.stringify(data, null, 2);
+    }
+
+    function openExternal(url) {
+      if (!url) {
+        return;
+      }
+      window.open(url, '_blank', 'noopener,noreferrer');
     }
 
     async function refreshProjectDetail() {
