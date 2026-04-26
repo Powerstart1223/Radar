@@ -432,6 +432,7 @@
             <span class="chip">PR ${item.pr_state || 'unknown'}</span>
             <span class="chip">checks ${item.checks_state || 'unknown'}</span>
             ${item.attention_count ? `<span class="chip ${item.attention_severity}">${item.attention_severity} attention ${item.attention_count}</span>` : ''}
+            ${(item.deployments || []).length ? `<span class="chip">deploy ${(item.deployments || []).map(target => target.provider).join(', ')}</span>` : ''}
           </div>
         </div>
       `).join('');
@@ -462,6 +463,17 @@
           <div class="item">
             <strong>${candidate.display_name}</strong><br>
             <span class="meta">${candidate.source} - ${candidate.review_status} - confidence ${candidate.confidence}</span>
+          </div>
+        `)
+        .join('');
+      const deployments = (project.deployments || [])
+        .map(target => `
+          <div class="item">
+            <strong>${target.provider}</strong> - ${target.environment}<br>
+            <span class="meta">state ${target.state}</span><br>
+            <span class="meta">marker ${target.marker || 'unknown'}</span><br>
+            <span class="meta">${target.runnable ? `command ${target.command}` : 'manual management only from this machine'}</span>
+            ${target.url ? `<br><span class="meta">${target.url}</span>` : ''}
           </div>
         `)
         .join('');
@@ -557,6 +569,13 @@
             <button class="btn secondary" onclick="refreshProjectRepo(${project.id})">Refresh Repo</button>
             <button class="btn secondary" onclick="syncProjectGithub(${project.id})">Sync GitHub</button>
             <button class="btn secondary" onclick="refreshProjectDetail()">Refresh Lane</button>
+          </div>
+        </div>
+        <div class="item">
+          <strong>Deployment</strong>
+          ${deployments || '<p>No deployment target detected for this project yet.</p>'}
+          <div class="actions">
+            <button class="btn secondary" onclick="deployProject(${project.id})">Deploy Available Target</button>
           </div>
         </div>
         <div class="item">
@@ -692,6 +711,16 @@
 
     async function syncProjectGithub(projectId) {
       const response = await fetch(`/api/projects/${projectId}/sync/github`, {
+        method: 'POST'
+      });
+      const data = await response.json();
+      await loadStatus();
+      await loadProjectDetail(projectId);
+      document.getElementById('status-json').textContent = JSON.stringify(data, null, 2);
+    }
+
+    async function deployProject(projectId) {
+      const response = await fetch(`/api/projects/${projectId}/deploy`, {
         method: 'POST'
       });
       const data = await response.json();

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import shutil
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -14,6 +15,38 @@ from app.core.config import Settings
 from app.db.database import Database, utc_now_iso
 
 STALE_REPO_HOURS = 72
+DEPLOY_TARGET_SPECS = (
+    {
+        "provider": "vercel",
+        "markers": ("vercel.json", ".vercel/project.json"),
+        "command": "vercel --prod",
+        "environment": "production",
+    },
+    {
+        "provider": "netlify",
+        "markers": ("netlify.toml",),
+        "command": "netlify deploy --prod",
+        "environment": "production",
+    },
+    {
+        "provider": "fly",
+        "markers": ("fly.toml",),
+        "command": "fly deploy",
+        "environment": "production",
+    },
+    {
+        "provider": "railway",
+        "markers": ("railway.json",),
+        "command": "railway up",
+        "environment": "production",
+    },
+    {
+        "provider": "render",
+        "markers": ("render.yaml", "render.yml"),
+        "command": "",
+        "environment": "production",
+    },
+)
 
 
 class ProjectService:
@@ -41,6 +74,10 @@ class ProjectService:
             item["attention"] = attention
             item["attention_count"] = len(attention)
             item["attention_severity"] = self._highest_attention_severity(attention)
+            item["deployments"] = self._merge_deployments(
+                saved_rows=self._load_deployments_for_project(int(item["id"])),
+                detected_targets=self._detect_deploy_targets(item.get("primary_local_path")),
+            )
         return items
 
     def get_project(self, project_id: int) -> dict | None:
@@ -122,6 +159,10 @@ class ProjectService:
         project["related_candidates"] = [dict(candidate) for candidate in related_candidates]
         project["recent_runs"] = [dict(run) for run in recent_runs]
         project["recent_events"] = [dict(event) for event in recent_events]
+        project["deployments"] = self._merge_deployments(
+            saved_rows=self._load_deployments_for_project(project_id),
+            detected_targets=self._detect_deploy_targets(project.get("primary_local_path")),
+        )
         project["attention"] = self._derive_attention(project, project["recent_runs"])
         project["attention_severity"] = self._highest_attention_severity(project["attention"])
         return project
@@ -193,6 +234,31 @@ class ProjectService:
                     skipped += 1
             conn.commit()
         return {"status": "completed", "refreshed": refreshed, "skipped": skipped}
+
+    def prepare_deploy_run(self, project_id: int) -> dict:
+        project = self.get_project(project_id)
+        if project is None:
+            raise ValueError("Project not found")
+
+        deployments = project.get("deployments") or []
+        target = next((item for item in deployments if item.get("runnable")), None)
+        if target is None:
+            raise ValueError("No runnable deployment target is available for project")
+
+        provider = str(target["provider"])
+        command = str(target["command"])
+        cwd = str(project.get("primary_local_path") or "")
+        if not cwd:
+            raise ValueError("Project has no local path for deployment")
+
+        self._mark_deploy_state(project_id, provider=provider, state="queued")
+        return {
+            "project_id": project_id,
+            "agent_type": "deploy",
+            "skill_name": f"deploy:{provider}",
+            "cwd": cwd,
+            "command": command,
+        }
 
     def sync_codex_activity(self) -> dict:
         return self._sync_agent_activity(source="codex", sessions_root=self.settings.codex_sessions_root, glob_pattern="*.jsonl")
@@ -445,6 +511,7 @@ class ProjectService:
                 synced_at,
             ),
         )
+        self._refresh_project_deployments(conn, project_id, repo_path)
         return True
 
     def _resolve_primary_local_path(self, conn, project_id: int, existing_path: str | None) -> str | None:
@@ -496,6 +563,130 @@ class ProjectService:
             return json.loads(raw)
         except json.JSONDecodeError:
             return {}
+
+    def _refresh_project_deployments(self, conn, project_id: int, repo_path: Path) -> None:
+        targets = self._detect_deploy_targets(str(repo_path))
+        existing_rows = conn.execute(
+            """
+            SELECT provider, environment
+            FROM deploy_snapshots
+            WHERE project_id = ?
+            """,
+            (project_id,),
+        ).fetchall()
+        existing_keys = {(str(row["provider"]), str(row["environment"])) for row in existing_rows}
+        target_keys = {(str(item["provider"]), str(item["environment"])) for item in targets}
+
+        for target in targets:
+            provider = str(target["provider"])
+            environment = str(target["environment"])
+            if (provider, environment) in existing_keys:
+                conn.execute(
+                    """
+                    UPDATE deploy_snapshots
+                    SET state = CASE
+                        WHEN state IN ('available', 'manual') THEN ?
+                        ELSE state
+                    END,
+                    updated_at = ?
+                    WHERE project_id = ? AND provider = ? AND environment = ?
+                    """,
+                    (
+                        "available" if target.get("runnable") else "manual",
+                        utc_now_iso(),
+                        project_id,
+                        provider,
+                        environment,
+                    ),
+                )
+            else:
+                conn.execute(
+                    """
+                    INSERT INTO deploy_snapshots (project_id, provider, environment, state, updated_at, url)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        project_id,
+                        provider,
+                        environment,
+                        "available" if target.get("runnable") else "manual",
+                        utc_now_iso(),
+                        None,
+                    ),
+                )
+
+        for provider, environment in existing_keys.difference(target_keys):
+            conn.execute(
+                """
+                DELETE FROM deploy_snapshots
+                WHERE project_id = ? AND provider = ? AND environment = ?
+                """,
+                (project_id, provider, environment),
+            )
+
+    def _detect_deploy_targets(self, local_path: str | None) -> list[dict]:
+        if not local_path:
+            return []
+        repo_path = Path(local_path)
+        if not repo_path.exists():
+            return []
+
+        targets: list[dict] = []
+        for spec in DEPLOY_TARGET_SPECS:
+            matched_marker = next((marker for marker in spec["markers"] if (repo_path / marker).exists()), None)
+            if matched_marker is None:
+                continue
+            command = str(spec["command"])
+            executable = command.split(" ", 1)[0] if command else ""
+            targets.append(
+                {
+                    "provider": spec["provider"],
+                    "environment": spec["environment"],
+                    "marker": matched_marker,
+                    "command": command,
+                    "runnable": bool(executable and shutil.which(executable)),
+                    "state": "available" if executable and shutil.which(executable) else "manual",
+                }
+            )
+        return targets
+
+    def _merge_deployments(self, *, saved_rows: list[dict], detected_targets: list[dict]) -> list[dict]:
+        detected_by_key = {
+            (str(item["provider"]), str(item["environment"])): item
+            for item in detected_targets
+        }
+        merged: list[dict] = []
+        for saved in saved_rows:
+            key = (str(saved["provider"]), str(saved["environment"]))
+            detected = detected_by_key.pop(key, None)
+            merged.append(
+                {
+                    "provider": saved["provider"],
+                    "environment": saved["environment"],
+                    "state": saved["state"] if saved.get("state") not in {"available", "manual"} else (
+                        detected["state"] if detected else saved["state"]
+                    ),
+                    "updated_at": saved.get("updated_at"),
+                    "url": saved.get("url"),
+                    "marker": detected.get("marker") if detected else "",
+                    "command": detected.get("command") if detected else "",
+                    "runnable": bool(detected and detected.get("runnable")),
+                }
+            )
+        for detected in detected_by_key.values():
+            merged.append(
+                {
+                    "provider": detected["provider"],
+                    "environment": detected["environment"],
+                    "state": detected["state"],
+                    "updated_at": None,
+                    "url": None,
+                    "marker": detected["marker"],
+                    "command": detected["command"],
+                    "runnable": detected["runnable"],
+                }
+            )
+        return sorted(merged, key=lambda item: (str(item["provider"]), str(item["environment"])))
 
     def _sync_agent_activity(self, *, source: str, sessions_root: Path, glob_pattern: str) -> dict:
         if not sessions_root.exists():
@@ -871,3 +1062,36 @@ class ProjectService:
                     (utc_now_iso(), (error_summary or "")[:500], source),
                 )
             conn.commit()
+
+    def _mark_deploy_state(self, project_id: int, *, provider: str, state: str) -> None:
+        with self.db.connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE deploy_snapshots
+                SET state = ?, updated_at = ?
+                WHERE project_id = ? AND provider = ?
+                """,
+                (state, utc_now_iso(), project_id, provider),
+            )
+            if cursor.rowcount == 0:
+                conn.execute(
+                    """
+                    INSERT INTO deploy_snapshots (project_id, provider, environment, state, updated_at, url)
+                    VALUES (?, ?, 'production', ?, ?, NULL)
+                    """,
+                    (project_id, provider, state, utc_now_iso()),
+                )
+            conn.commit()
+
+    def _load_deployments_for_project(self, project_id: int) -> list[dict]:
+        with self.db.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT provider, environment, state, updated_at, url
+                FROM deploy_snapshots
+                WHERE project_id = ?
+                ORDER BY provider ASC, environment ASC, updated_at DESC
+                """,
+                (project_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]

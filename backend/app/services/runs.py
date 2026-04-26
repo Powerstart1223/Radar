@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import shlex
 import shutil
 import subprocess
 import threading
@@ -110,6 +111,7 @@ class RunService:
                     (utc_now_iso(), "run cancelled before start", run_id),
                 )
                 conn.commit()
+                self._sync_deploy_snapshot_state(run_id, "cancelled")
                 return {"run_id": run_id, "status": "cancelled"}
 
             conn.execute(
@@ -224,7 +226,7 @@ class RunService:
                     return
 
             command = str(run["command"])
-            executable = str(run["agent_type"])
+            executable = self._executable_name(command, fallback=str(run["agent_type"]))
             missing_binary = shutil.which(executable) is None
             with log_path.open("a", encoding="utf-8") as handle:
                 handle.write(f"[{utc_now_iso()}] starting run {run_id}\n")
@@ -296,6 +298,7 @@ class RunService:
                 (status, utc_now_iso(), output_summary[:500], run_id),
             )
             conn.commit()
+        self._sync_deploy_snapshot_state(run_id, status)
 
     def _build_summary(self, returncode: int, stdout: str | None, stderr: str | None) -> str:
         if returncode < 0:
@@ -328,3 +331,32 @@ class RunService:
                 (run_id,),
             ).fetchone()
         return str(row["status"]) if row else None
+
+    def _executable_name(self, command: str, *, fallback: str) -> str:
+        try:
+            parts = shlex.split(command, posix=False)
+        except ValueError:
+            parts = command.strip().split()
+        if not parts:
+            return fallback
+        return Path(parts[0]).name.strip('"') or fallback
+
+    def _sync_deploy_snapshot_state(self, run_id: int, status: str) -> None:
+        run = self._load_run(run_id)
+        if run is None:
+            return
+        skill_name = str(run.get("skill_name") or "")
+        if not skill_name.startswith("deploy:"):
+            return
+
+        provider = skill_name.split(":", 1)[1] or "unknown"
+        with self.db.connect() as conn:
+            conn.execute(
+                """
+                UPDATE deploy_snapshots
+                SET state = ?, updated_at = ?
+                WHERE project_id = ? AND provider = ?
+                """,
+                (status, utc_now_iso(), int(run["project_id"]), provider),
+            )
+            conn.commit()

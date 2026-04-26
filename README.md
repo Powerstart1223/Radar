@@ -4,12 +4,14 @@ Standalone local operator portal for Codex and OpenClaw projects.
 
 ## Current scaffold
 
-This initial build includes:
+This current build includes:
 
 - FastAPI backend
 - SQLite schema bootstrap
-- discovery candidate stub endpoint
-- project and run API placeholders
+- real discovery from git repos plus Codex/OpenClaw session stores
+- project review, repo refresh, GitHub sync, and attention queues
+- agent run queueing with logs per project
+- deployment target detection for common providers and one-click deploy when a local provider CLI is available
 - local HTML shell at `/`
 
 ## Run locally
@@ -28,6 +30,6 @@ http://127.0.0.1:8787
 
 ## Next build steps
 
-1. Replace the discovery stub with real git/Codex/OpenClaw scanners.
-2. Add canonical project merge/review flow.
-3. Add isolated subprocess run launching per project.
+1. Add safer structured execution for queued runs instead of editable raw shell commands.
+2. Expand deployment adapters beyond the current file-marker providers.
+3. Add broader portfolio views for agent runs and deployment history.

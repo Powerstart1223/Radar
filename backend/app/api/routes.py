@@ -65,6 +65,15 @@ def build_router(
     def sync_project_github(project_id: int) -> dict:
         return projects.sync_github_pull_requests(project_id)
 
+    @router.post("/api/projects/{project_id}/deploy")
+    def deploy_project(project_id: int) -> dict:
+        try:
+            payload = projects.prepare_deploy_run(project_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        run_id = runs.queue_run(payload)
+        return {"run_id": run_id, "status": "queued", "provider": payload["skill_name"].split(":", 1)[1]}
+
     @router.get("/api/discovery/candidates")
     def list_candidates() -> dict:
         return {"items": discovery.list_candidates()}
