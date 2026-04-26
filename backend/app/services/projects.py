@@ -257,7 +257,6 @@ class ProjectService:
             "agent_type": "deploy",
             "skill_name": f"deploy:{provider}",
             "cwd": cwd,
-            "command": command,
         }
 
     def sync_codex_activity(self) -> dict:

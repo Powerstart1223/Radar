@@ -135,7 +135,16 @@ def build_router(
         missing = sorted(required.difference(payload))
         if missing:
             raise HTTPException(status_code=400, detail=f"Missing fields: {', '.join(missing)}")
-        run_id = runs.queue_run(payload)
+        sanitized_payload = {
+            "project_id": payload["project_id"],
+            "agent_type": payload["agent_type"],
+            "skill_name": payload["skill_name"],
+            "cwd": payload["cwd"],
+        }
+        try:
+            run_id = runs.queue_run(sanitized_payload)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"run_id": run_id, "status": "queued"}
 
     @router.post("/api/runs/{run_id}/cancel")

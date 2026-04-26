@@ -1,14 +1,20 @@
-"""Run orchestration stubs."""
+"""Run orchestration for project and deploy actions."""
 
 from __future__ import annotations
 
 from pathlib import Path
-import shlex
 import shutil
 import subprocess
 import threading
 
 from app.db.database import Database, utc_now_iso
+
+DEPLOY_COMMANDS = {
+    "vercel": ["vercel", "--prod"],
+    "netlify": ["netlify", "deploy", "--prod"],
+    "fly": ["fly", "deploy"],
+    "railway": ["railway", "up"],
+}
 
 
 class RunService:
@@ -59,7 +65,7 @@ class RunService:
 
     def queue_run(self, payload: dict) -> int:
         cwd = str(payload["cwd"])
-        command = str(payload.get("command") or self.default_command(payload["agent_type"], payload["skill_name"], cwd))
+        command = self.display_command(payload["agent_type"], payload["skill_name"], cwd)
         started_at = utc_now_iso()
         artifact_dir = self._artifact_dir(payload["project_id"], started_at)
         log_path = self._log_path(payload["project_id"], started_at)
@@ -165,11 +171,34 @@ class RunService:
         if self._coordinator_thread and self._coordinator_thread.is_alive():
             self._coordinator_thread.join(timeout=2)
 
-    def default_command(self, agent_type: str, skill_name: str, cwd: str) -> str:
+    def display_command(self, agent_type: str, skill_name: str, cwd: str) -> str:
+        args = self.command_args(agent_type, skill_name, cwd)
+        return subprocess.list2cmdline(args)
+
+    def command_args(self, agent_type: str, skill_name: str, cwd: str) -> list[str]:
+        normalized_agent = str(agent_type).strip().lower()
+        normalized_skill = str(skill_name).strip()
+
+        if normalized_agent in {"codex", "openclaw"}:
+            return self._agent_command_args(normalized_agent, normalized_skill, cwd)
+        if normalized_agent == "deploy":
+            return self._deploy_command_args(normalized_skill)
+        raise ValueError(f"Unsupported agent type: {agent_type}")
+
+    def _agent_command_args(self, agent_type: str, skill_name: str, cwd: str) -> list[str]:
         prompt = f"use gstack {skill_name} in this project and improve the highest-value next issue"
         if agent_type == "openclaw":
-            return f'openclaw --cwd "{cwd}" "{prompt}"'
-        return f'codex --cwd "{cwd}" "{prompt}"'
+            return ["openclaw", "--cwd", cwd, prompt]
+        return ["codex", "--cwd", cwd, prompt]
+
+    def _deploy_command_args(self, skill_name: str) -> list[str]:
+        if not skill_name.startswith("deploy:"):
+            raise ValueError(f"Unsupported deploy skill: {skill_name}")
+        provider = skill_name.split(":", 1)[1].strip().lower()
+        command = DEPLOY_COMMANDS.get(provider)
+        if command is None:
+            raise ValueError(f"Unsupported deploy provider: {provider}")
+        return list(command)
 
     def _artifact_dir(self, project_id: int, started_at: str) -> str:
         safe_stamp = started_at.replace(":", "-")
@@ -225,8 +254,9 @@ class RunService:
                 if cursor.rowcount == 0:
                     return
 
-            command = str(run["command"])
-            executable = self._executable_name(command, fallback=str(run["agent_type"]))
+            command_args = self.command_args(str(run["agent_type"]), str(run["skill_name"]), str(run["cwd"]))
+            command = subprocess.list2cmdline(command_args)
+            executable = Path(command_args[0]).name
             missing_binary = shutil.which(executable) is None
             with log_path.open("a", encoding="utf-8") as handle:
                 handle.write(f"[{utc_now_iso()}] starting run {run_id}\n")
@@ -241,9 +271,8 @@ class RunService:
                     return
 
                 process = subprocess.Popen(
-                    command,
+                    command_args,
                     cwd=str(run["cwd"]),
-                    shell=True,
                     text=True,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
@@ -331,15 +360,6 @@ class RunService:
                 (run_id,),
             ).fetchone()
         return str(row["status"]) if row else None
-
-    def _executable_name(self, command: str, *, fallback: str) -> str:
-        try:
-            parts = shlex.split(command, posix=False)
-        except ValueError:
-            parts = command.strip().split()
-        if not parts:
-            return fallback
-        return Path(parts[0]).name.strip('"') or fallback
 
     def _sync_deploy_snapshot_state(self, run_id: int, status: str) -> None:
         run = self._load_run(run_id)

@@ -560,8 +560,8 @@
           </div>
           <div class="form-row" style="grid-template-columns: 1fr;">
             <div>
-              <label for="run-command">Command Preview</label>
-              <textarea id="run-command">${escapeHtml(defaultCommand)}</textarea>
+              <label for="run-command-preview">Command Preview</label>
+              <textarea id="run-command-preview" readonly>${escapeHtml(defaultCommand)}</textarea>
             </div>
           </div>
           <div class="actions">
@@ -634,7 +634,7 @@
       const agent = document.getElementById('agent-type');
       const skill = document.getElementById('skill-name');
       const cwd = document.getElementById('run-cwd');
-      const command = document.getElementById('run-command');
+      const command = document.getElementById('run-command-preview');
       if (!agent || !skill || !cwd || !command) {
         return;
       }
@@ -645,7 +645,6 @@
       const agent = document.getElementById('agent-type');
       const skill = document.getElementById('skill-name');
       const cwd = document.getElementById('run-cwd');
-      const command = document.getElementById('run-command');
       const response = await fetch('/api/runs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -653,8 +652,7 @@
           project_id: projectId,
           agent_type: agent.value,
           skill_name: skill.value,
-          cwd: cwd.value,
-          command: command.value
+          cwd: cwd.value
         })
       });
       const data = await response.json();
