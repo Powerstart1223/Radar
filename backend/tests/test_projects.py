@@ -564,6 +564,78 @@ class ProjectServiceDeploymentTests(unittest.TestCase):
         self.assertEqual(result[0]["deploy_id"], "dep-1")
         live_collector.assert_not_called()
 
+    def test_store_release_snapshots_replaces_matching_release_key(self) -> None:
+        self.service = ProjectService(self.db, self.settings)
+        snapshot = {
+            "project_id": 1,
+            "provider": "netlify",
+            "environment": "production",
+            "service_name": "radar-site",
+            "management_url": "https://app.netlify.com/sites/radar-site",
+            "deploy_id": "dep-1",
+            "state": "finished",
+            "raw_state": "ready",
+            "updated_at": "2026-04-26T23:00:00Z",
+            "url": "https://radar-site.netlify.app",
+            "summary": "production",
+            "is_current": True,
+            "details": {"provider": "netlify"},
+            "actions": [],
+            "release_health": "current",
+            "health_reason": "This is the active release.",
+            "release_sync_status": "live",
+            "release_sync_at": "2026-04-26T23:05:00Z",
+            "next_sync_due_at": "2026-04-26T23:20:00Z",
+            "release_sync_reason": "Release metadata is freshly synced.",
+        }
+        self.service._store_release_snapshots([snapshot])
+        updated = dict(snapshot)
+        updated["summary"] = "updated production"
+        self.service._store_release_snapshots([updated])
+
+        with self.db.connect() as conn:
+            row = conn.execute("SELECT COUNT(*) AS count FROM release_snapshots").fetchone()
+            summary = conn.execute("SELECT summary FROM release_snapshots").fetchone()["summary"]
+
+        self.assertEqual(int(row["count"]), 1)
+        self.assertEqual(summary, "updated production")
+
+    def test_prune_release_snapshots_removes_old_rows(self) -> None:
+        self.service = ProjectService(self.db, self.settings)
+        old_snapshot = {
+            "project_id": 1,
+            "provider": "netlify",
+            "environment": "production",
+            "service_name": "radar-site",
+            "management_url": "",
+            "deploy_id": "old-dep",
+            "state": "finished",
+            "raw_state": "ready",
+            "updated_at": "2020-01-01T00:00:00+00:00",
+            "url": "",
+            "summary": "old",
+            "is_current": False,
+            "details": {},
+            "actions": [],
+            "release_health": "stale",
+            "health_reason": "old",
+            "release_sync_status": "stale",
+            "release_sync_at": "",
+            "next_sync_due_at": "",
+            "release_sync_reason": "",
+        }
+        new_snapshot = dict(old_snapshot)
+        new_snapshot["deploy_id"] = "new-dep"
+        new_snapshot["updated_at"] = "2026-04-26T23:00:00+00:00"
+        new_snapshot["summary"] = "new"
+
+        self.service._store_release_snapshots([old_snapshot, new_snapshot])
+
+        with self.db.connect() as conn:
+            rows = conn.execute("SELECT deploy_id FROM release_snapshots ORDER BY deploy_id").fetchall()
+
+        self.assertEqual([row["deploy_id"] for row in rows], ["new-dep"])
+
     def test_release_health_classification(self) -> None:
         current = self.service._release_health({"state": "finished", "is_current": True, "details": {}})
         rollbackable = self.service._release_health(

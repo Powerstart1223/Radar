@@ -21,6 +21,8 @@ from app.db.database import Database, utc_now_iso
 STALE_REPO_HOURS = 72
 RELEASE_SYNC_INTERVAL_MINUTES = 15
 RELEASE_SYNC_STALE_MINUTES = 45
+RELEASE_SNAPSHOT_RETENTION_DAYS = 30
+RELEASE_SNAPSHOT_MAX_ROWS = 2000
 DEPLOY_TARGET_SPECS = (
     {
         "provider": "vercel",
@@ -1252,7 +1254,24 @@ class ProjectService:
     def _store_release_snapshots(self, releases: list[dict]) -> None:
         captured_at = utc_now_iso()
         with self.db.connect() as conn:
-            conn.execute("DELETE FROM release_snapshots")
+            current_keys = [
+                (
+                    int(item["project_id"]),
+                    str(item.get("provider") or ""),
+                    str(item.get("environment") or "production"),
+                    str(item.get("deploy_id") or ""),
+                )
+                for item in releases
+                if str(item.get("deploy_id") or "").strip()
+            ]
+            if current_keys:
+                conn.executemany(
+                    """
+                    DELETE FROM release_snapshots
+                    WHERE project_id = ? AND provider = ? AND environment = ? AND deploy_id = ?
+                    """,
+                    current_keys,
+                )
             conn.executemany(
                 """
                 INSERT INTO release_snapshots (
@@ -1290,6 +1309,7 @@ class ProjectService:
                     if str(item.get("deploy_id") or "").strip()
                 ],
             )
+            self._prune_release_snapshots(conn)
             conn.commit()
 
     def _load_release_snapshots(self, *, limit: int) -> list[dict]:
@@ -1302,6 +1322,16 @@ class ProjectService:
                        rs.release_health, rs.health_reason, rs.release_sync_status,
                        rs.release_sync_at, rs.next_sync_due_at, rs.release_sync_reason
                 FROM release_snapshots rs
+                JOIN (
+                    SELECT project_id, provider, environment, deploy_id, MAX(id) AS max_id
+                    FROM release_snapshots
+                    GROUP BY project_id, provider, environment, deploy_id
+                ) latest
+                  ON latest.project_id = rs.project_id
+                 AND latest.provider = rs.provider
+                 AND latest.environment = rs.environment
+                 AND latest.deploy_id = rs.deploy_id
+                 AND latest.max_id = rs.id
                 LEFT JOIN projects p ON p.id = rs.project_id
                 ORDER BY COALESCE(rs.updated_at, rs.captured_at) DESC, rs.id DESC
                 LIMIT ?
@@ -1337,6 +1367,32 @@ class ProjectService:
                 }
             )
         return snapshots
+
+    def _prune_release_snapshots(self, conn) -> None:
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=RELEASE_SNAPSHOT_RETENTION_DAYS)).isoformat()
+        conn.execute(
+            """
+            DELETE FROM release_snapshots
+            WHERE COALESCE(updated_at, captured_at) < ?
+            """,
+            (cutoff,),
+        )
+        total_row = conn.execute("SELECT COUNT(*) AS count FROM release_snapshots").fetchone()
+        total = int(total_row["count"]) if total_row else 0
+        if total <= RELEASE_SNAPSHOT_MAX_ROWS:
+            return
+        overflow = total - RELEASE_SNAPSHOT_MAX_ROWS
+        conn.execute(
+            f"""
+            DELETE FROM release_snapshots
+            WHERE id IN (
+                SELECT id
+                FROM release_snapshots
+                ORDER BY COALESCE(updated_at, captured_at) ASC, id ASC
+                LIMIT {overflow}
+            )
+            """
+        )
 
     def _deployment_actions(self, deployment: dict) -> list[dict]:
         provider = str(deployment.get("provider") or "").strip().lower()
