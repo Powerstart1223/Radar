@@ -303,6 +303,7 @@
           </select>
         </div>
       </div>
+      <div id="operations-summary" class="chips" style="margin-top:0; margin-bottom:12px"></div>
       <div id="release-focus-chips" class="chips" style="margin-top:0; margin-bottom:12px"></div>
       <div id="operations-banner" class="banner-stack" style="margin-bottom:12px"></div>
       <div id="operations-list">Loading operations...</div>
@@ -628,6 +629,31 @@
       }).join('');
     }
 
+    function renderOperationsSummary() {
+      const container = document.getElementById('operations-summary');
+      if (!container) {
+        return;
+      }
+      const activeRuns = operationsRuns.filter(isActiveRun).length;
+      const failedRuns = operationsRuns.filter(isFailedRun).length;
+      const activeDeployments = operationsDeployments.filter(isActiveDeployment).length;
+      const failedDeployments = operationsDeployments.filter(isFailedDeployment).length;
+      const manualDeployments = operationsDeployments.filter(item => String(item.state || '') === 'manual').length;
+      const riskyReleases = operationsReleases.filter(item => String(item.release_health || '') === 'risky').length;
+      const fallbackReleases = operationsReleases.filter(item => String(item.release_data_mode || '') === 'fallback-cache').length;
+      const staleReleases = operationsReleases.filter(item => String(item.release_data_mode || '') === 'stale-cache').length;
+      container.innerHTML = [
+        `<span class="chip ${activeRuns ? 'medium' : ''}">Runs Active ${safeText(activeRuns)}</span>`,
+        `<span class="chip ${failedRuns ? 'high' : ''}">Runs Failed ${safeText(failedRuns)}</span>`,
+        `<span class="chip ${activeDeployments ? 'medium' : ''}">Deployments Active ${safeText(activeDeployments)}</span>`,
+        `<span class="chip ${failedDeployments ? 'high' : ''}">Deployments Failed ${safeText(failedDeployments)}</span>`,
+        `<span class="chip ${manualDeployments ? 'medium' : ''}">Deployments Manual ${safeText(manualDeployments)}</span>`,
+        `<span class="chip ${riskyReleases ? 'high' : ''}">Releases Risky ${safeText(riskyReleases)}</span>`,
+        `<span class="chip ${fallbackReleases ? 'high' : ''}">Releases Fallback ${safeText(fallbackReleases)}</span>`,
+        `<span class="chip ${staleReleases ? 'high' : ''}">Releases Stale ${safeText(staleReleases)}</span>`,
+      ].join('');
+    }
+
     function renderOperationsBoard() {
       const view = document.getElementById('operations-view')?.value || 'runs';
       const filter = document.getElementById('operations-filter')?.value || 'all';
@@ -635,6 +661,7 @@
       if (!container) {
         return;
       }
+      renderOperationsSummary();
       renderReleaseFocusChips(view, filter);
       renderOperationsBanner(view);
 
