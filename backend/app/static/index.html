@@ -533,6 +533,43 @@
       `;
     }
 
+    function operationFilterOptions(view) {
+      if (view === 'releases') {
+        return [
+          { value: 'all', label: 'All' },
+          { value: 'failed', label: 'Failed' },
+          { value: 'risky', label: 'Risky' },
+          { value: 'rollbackable', label: 'Rollbackable' },
+          { value: 'current', label: 'Current' },
+          { value: 'fallback-cache', label: 'Fallback Cache' },
+          { value: 'stale-cache', label: 'Stale Cache' },
+          { value: 'synced-cache', label: 'Synced Cache' },
+          { value: 'live-provider', label: 'Live Provider' },
+        ];
+      }
+      return [
+        { value: 'all', label: 'All' },
+        { value: 'active', label: 'Active' },
+        { value: 'failed', label: 'Failed' },
+        { value: 'manual', label: 'Manual Only' },
+      ];
+    }
+
+    function syncOperationsFilterOptions() {
+      const view = document.getElementById('operations-view')?.value || 'runs';
+      const filterSelect = document.getElementById('operations-filter');
+      if (!filterSelect) {
+        return;
+      }
+      const previous = filterSelect.value || 'all';
+      const options = operationFilterOptions(view);
+      filterSelect.innerHTML = options
+        .map(option => `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`)
+        .join('');
+      const allowed = options.some(option => option.value === previous) ? previous : 'all';
+      filterSelect.value = allowed;
+    }
+
     function renderOperationsBoard() {
       const view = document.getElementById('operations-view')?.value || 'runs';
       const filter = document.getElementById('operations-filter')?.value || 'all';
@@ -562,16 +599,22 @@
           return true;
         }
         if (view === 'releases') {
-          if (filter === 'active') {
-            return isActiveRelease(item);
-          }
           if (filter === 'failed') {
             return isFailedRelease(item);
           }
-          if (filter === 'manual') {
-            return false;
+          if (filter === 'risky') {
+            return String(item.release_health || '') === 'risky';
           }
-          return true;
+          if (filter === 'rollbackable') {
+            return String(item.release_health || '') === 'rollbackable';
+          }
+          if (filter === 'current') {
+            return String(item.release_health || '') === 'current';
+          }
+          if (filter === 'fallback-cache' || filter === 'stale-cache' || filter === 'synced-cache' || filter === 'live-provider') {
+            return String(item.release_data_mode || '') === filter;
+          }
+          return filter === 'all';
         }
         if (filter === 'active') {
           return isActiveDeployment(item);
@@ -1320,13 +1363,17 @@
     document.getElementById('sync-openclaw').addEventListener('click', syncOpenClaw);
     document.getElementById('sync-github').addEventListener('click', syncGithub);
     document.getElementById('sync-deployments').addEventListener('click', syncDeployments);
-    document.getElementById('operations-view').addEventListener('change', renderOperationsBoard);
+    document.getElementById('operations-view').addEventListener('change', () => {
+      syncOperationsFilterOptions();
+      renderOperationsBoard();
+    });
     document.getElementById('operations-filter').addEventListener('change', renderOperationsBoard);
     setInterval(() => {
       if (selectedProjectId) {
         loadProjectDetail(selectedProjectId);
       }
     }, 5000);
+    syncOperationsFilterOptions();
     loadSkills().then(loadStatus);
   </script>
 </body>
