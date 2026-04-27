@@ -303,6 +303,7 @@
           </select>
         </div>
       </div>
+      <div id="operations-banner" class="banner-stack" style="margin-bottom:12px"></div>
       <div id="operations-list">Loading operations...</div>
     </section>
 
@@ -344,6 +345,7 @@
     let operationsRuns = [];
     let operationsDeployments = [];
     let operationsReleases = [];
+    let latestStatus = null;
     const deploymentHistoryCache = {};
     let selectedReleaseDetails = null;
 
@@ -465,6 +467,72 @@
       return String(item.state || '') === 'failed';
     }
 
+    function releaseBannerState(syncStatus) {
+      const status = String(syncStatus?.status || 'unknown');
+      if (status === 'error') {
+        return {
+          severity: 'high',
+          title: 'Release feed is serving retained cache after provider sync failure.',
+        };
+      }
+      if (status === 'stale') {
+        return {
+          severity: 'high',
+          title: 'Release feed is serving stale cached snapshots until provider sync recovers.',
+        };
+      }
+      if (status === 'recent') {
+        return {
+          severity: 'medium',
+          title: 'Release feed is currently backed by cached snapshots from a recent provider sync.',
+        };
+      }
+      if (status === 'live') {
+        return {
+          severity: 'medium',
+          title: 'Release feed is backed by fresh cached snapshots from the latest provider sync.',
+        };
+      }
+      return {
+        severity: 'medium',
+        title: 'Release feed is waiting for provider sync and may be serving retained cache only.',
+      };
+    }
+
+    function renderOperationsBanner(view) {
+      const container = document.getElementById('operations-banner');
+      if (!container) {
+        return;
+      }
+      if (view !== 'releases') {
+        container.innerHTML = '';
+        return;
+      }
+
+      const syncStatus = latestStatus?.release_sync || {};
+      const banner = releaseBannerState(syncStatus);
+      const reason = safeText(syncStatus.reason || 'Release metadata has not been synced yet.');
+      const lastSuccess = syncStatus.last_success_at
+        ? `<div class="meta">Last successful sync ${safeText(syncStatus.last_success_at)}</div>`
+        : '';
+      const lastError = syncStatus.last_error_at
+        ? `<div class="meta">Last failed sync ${safeText(syncStatus.last_error_at)}</div>`
+        : '';
+      const nextDue = syncStatus.next_due_at
+        ? `<div class="meta">Next refresh due ${safeText(syncStatus.next_due_at)}</div>`
+        : '';
+
+      container.innerHTML = `
+        <div class="banner ${safeText(banner.severity)}">
+          <strong>${safeText(banner.title)}</strong>
+          <div class="meta" style="margin-top:6px">${reason}</div>
+          ${lastSuccess}
+          ${lastError}
+          ${nextDue}
+        </div>
+      `;
+    }
+
     function renderOperationsBoard() {
       const view = document.getElementById('operations-view')?.value || 'runs';
       const filter = document.getElementById('operations-filter')?.value || 'all';
@@ -472,6 +540,7 @@
       if (!container) {
         return;
       }
+      renderOperationsBanner(view);
 
       const items = view === 'deployments'
         ? operationsDeployments
@@ -1207,6 +1276,7 @@
     async function loadStatus() {
       const response = await fetch('/api/status');
       const data = await response.json();
+      latestStatus = data;
       document.getElementById('projects').textContent = data.projects;
       document.getElementById('candidates').textContent = data.candidates;
       document.getElementById('runs').textContent = data.active_runs || data.runs;
