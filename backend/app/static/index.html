@@ -350,6 +350,8 @@
     let latestStatus = null;
     const deploymentHistoryCache = {};
     let selectedReleaseDetails = null;
+    const OPERATIONS_VIEW_KEY = 'project-radar:operations-view';
+    const OPERATIONS_FILTER_KEY = 'project-radar:operations-filter';
 
     function safeEvidence(raw) {
       if (!raw) {
@@ -365,6 +367,25 @@
     function safeText(value, fallback = '') {
       const normalized = value === null || value === undefined || value === '' ? fallback : String(value);
       return escapeHtml(normalized);
+    }
+
+    function persistOperationsState(view, filter) {
+      try {
+        window.localStorage.setItem(OPERATIONS_VIEW_KEY, String(view || 'runs'));
+        window.localStorage.setItem(OPERATIONS_FILTER_KEY, String(filter || 'all'));
+      } catch (_error) {
+        // Ignore local storage failures and continue with in-memory UI state.
+      }
+    }
+
+    function restoreOperationsState() {
+      try {
+        const view = window.localStorage.getItem(OPERATIONS_VIEW_KEY) || 'runs';
+        const filter = window.localStorage.getItem(OPERATIONS_FILTER_KEY) || 'all';
+        return { view, filter };
+      } catch (_error) {
+        return { view: 'runs', filter: 'all' };
+      }
     }
 
     async function loadCandidates() {
@@ -610,6 +631,8 @@
         return;
       }
       filterSelect.value = filterValue;
+      const view = document.getElementById('operations-view')?.value || 'runs';
+      persistOperationsState(view, filterValue);
       renderOperationsBoard();
     }
 
@@ -624,6 +647,7 @@
       if (filterSelect && filterValue) {
         filterSelect.value = filterValue;
       }
+      persistOperationsState(view, filterSelect?.value || filterValue || 'all');
       renderOperationsBoard();
     }
 
@@ -678,6 +702,7 @@
       if (!container) {
         return;
       }
+      persistOperationsState(view, filter);
       renderOperationsSummary();
       renderReleaseFocusChips(view, filter);
       renderOperationsBanner(view);
@@ -1453,6 +1478,9 @@
     document.getElementById('sync-deployments').addEventListener('click', syncDeployments);
     document.getElementById('operations-view').addEventListener('change', () => {
       syncOperationsFilterOptions();
+      const view = document.getElementById('operations-view')?.value || 'runs';
+      const filter = document.getElementById('operations-filter')?.value || 'all';
+      persistOperationsState(view, filter);
       renderOperationsBoard();
     });
     document.getElementById('operations-filter').addEventListener('change', renderOperationsBoard);
@@ -1461,7 +1489,23 @@
         loadProjectDetail(selectedProjectId);
       }
     }, 5000);
+    const restoredOperations = restoreOperationsState();
+    const operationsViewSelect = document.getElementById('operations-view');
+    if (operationsViewSelect) {
+      operationsViewSelect.value = restoredOperations.view || 'runs';
+    }
     syncOperationsFilterOptions();
+    const operationsFilterSelect = document.getElementById('operations-filter');
+    if (operationsFilterSelect) {
+      const allowed = Array.from(operationsFilterSelect.options).some(option => option.value === restoredOperations.filter)
+        ? restoredOperations.filter
+        : operationsFilterSelect.value;
+      operationsFilterSelect.value = allowed;
+    }
+    persistOperationsState(
+      document.getElementById('operations-view')?.value || 'runs',
+      document.getElementById('operations-filter')?.value || 'all'
+    );
     loadSkills().then(loadStatus);
   </script>
 </body>
