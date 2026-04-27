@@ -584,6 +584,30 @@
       };
     }
 
+    function clearRestoredSessionState() {
+      try {
+        [
+          OPERATIONS_VIEW_KEY,
+          OPERATIONS_FILTER_KEY,
+          SELECTED_PROJECT_KEY,
+          SELECTED_LOG_RUN_KEY,
+          RELEASE_DETAILS_KEY,
+          DEPLOYMENT_HISTORY_KEYS,
+          AGENT_FORM_STATE_KEY,
+        ].forEach(key => window.localStorage.removeItem(key));
+      } catch (_error) {
+        // Ignore local storage failures and continue with a best-effort reset.
+      }
+      restoredSessionState = null;
+      selectedProjectId = null;
+      selectedLogRunId = null;
+      selectedReleaseDetails = null;
+      Object.keys(deploymentHistoryCache).forEach(key => {
+        delete deploymentHistoryCache[key];
+      });
+      window.location.reload();
+    }
+
     function renderSessionRestoreBanner() {
       const panel = document.getElementById('session-restore-panel');
       const container = document.getElementById('session-restore-banner');
@@ -615,7 +639,12 @@
         );
       }
       panel.style.display = '';
-      container.innerHTML = `<div class="chips">${items.join('')}</div>`;
+      container.innerHTML = `
+        <div class="chips">${items.join('')}</div>
+        <div class="actions" style="margin-top:12px">
+          <button class="btn secondary" onclick="clearRestoredSessionState()">Clear Restored Session</button>
+        </div>
+      `;
     }
 
     async function loadCandidates() {
