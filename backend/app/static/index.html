@@ -356,6 +356,7 @@
     const SELECTED_LOG_RUN_KEY = 'project-radar:selected-log-run-id';
     const RELEASE_DETAILS_KEY = 'project-radar:release-details';
     const DEPLOYMENT_HISTORY_KEYS = 'project-radar:deployment-history-keys';
+    const AGENT_FORM_STATE_KEY = 'project-radar:agent-form-state';
 
     function safeEvidence(raw) {
       if (!raw) {
@@ -508,6 +509,43 @@
         ? Array.from(new Set([...current, key]))
         : current.filter(item => item !== key);
       persistExpandedDeploymentHistories(next);
+    }
+
+    function restoreAgentFormState() {
+      try {
+        const value = window.localStorage.getItem(AGENT_FORM_STATE_KEY);
+        if (!value) {
+          return {};
+        }
+        const parsed = JSON.parse(value);
+        return parsed && typeof parsed === 'object' ? parsed : {};
+      } catch (_error) {
+        return {};
+      }
+    }
+
+    function persistAgentFormState(projectId, state) {
+      try {
+        const allState = restoreAgentFormState();
+        const key = String(projectId || '');
+        if (!key) {
+          return;
+        }
+        allState[key] = {
+          agent_type: String(state?.agent_type || 'codex'),
+          skill_name: String(state?.skill_name || ''),
+          cwd: String(state?.cwd || ''),
+        };
+        window.localStorage.setItem(AGENT_FORM_STATE_KEY, JSON.stringify(allState));
+      } catch (_error) {
+        // Ignore local storage failures and continue with in-memory UI state.
+      }
+    }
+
+    function projectAgentFormState(projectId) {
+      const allState = restoreAgentFormState();
+      const key = String(projectId || '');
+      return key && allState[key] && typeof allState[key] === 'object' ? allState[key] : null;
     }
 
     async function loadCandidates() {
@@ -1255,7 +1293,11 @@
         .map(skill => `<option value="${safeText(skill.name)}">${safeText(skill.name)}</option>`)
         .join('');
       const defaultSkill = skills[0]?.name || 'office-hours';
-      const defaultCommand = buildDefaultCommand('codex', defaultSkill, project.primary_local_path || '');
+      const savedAgentForm = projectAgentFormState(projectId) || {};
+      const initialAgentType = savedAgentForm.agent_type === 'openclaw' ? 'openclaw' : 'codex';
+      const initialSkill = skills.some(skill => skill.name === savedAgentForm.skill_name) ? savedAgentForm.skill_name : defaultSkill;
+      const initialCwd = savedAgentForm.cwd || project.primary_local_path || '';
+      const defaultCommand = buildDefaultCommand(initialAgentType, initialSkill, initialCwd);
 
       document.getElementById('project-detail').innerHTML = `
         <div class="item">
@@ -1281,8 +1323,8 @@
             <div>
               <label for="agent-type">Agent</label>
               <select id="agent-type" onchange="syncLaunchCommand()">
-                <option value="codex">codex</option>
-                <option value="openclaw">openclaw</option>
+                <option value="codex"${initialAgentType === 'codex' ? ' selected' : ''}>codex</option>
+                <option value="openclaw"${initialAgentType === 'openclaw' ? ' selected' : ''}>openclaw</option>
               </select>
             </div>
             <div>
@@ -1295,7 +1337,7 @@
           <div class="form-row" style="grid-template-columns: 1fr;">
             <div>
               <label for="run-cwd">Working Directory</label>
-              <input id="run-cwd" value="${escapeHtml(project.primary_local_path || '')}" onchange="syncLaunchCommand()">
+              <input id="run-cwd" value="${escapeHtml(initialCwd)}" onchange="syncLaunchCommand()">
             </div>
           </div>
           <div class="form-row" style="grid-template-columns: 1fr;">
@@ -1341,7 +1383,8 @@
           <pre id="run-log-viewer">${selectedLogRunId ? 'Loading log...' : 'Select a run log.'}</pre>
         </div>
       `;
-      document.getElementById('skill-name').value = defaultSkill;
+      document.getElementById('skill-name').value = initialSkill;
+      syncLaunchCommand();
       if (!selectedLogRunId) {
         selectedLogRunId = restoreSelectedLogRun();
       }
@@ -1402,12 +1445,24 @@
         return;
       }
       command.value = buildDefaultCommand(agent.value, skill.value, cwd.value);
+      if (selectedProjectId) {
+        persistAgentFormState(selectedProjectId, {
+          agent_type: agent.value,
+          skill_name: skill.value,
+          cwd: cwd.value,
+        });
+      }
     }
 
     async function queueProjectRun(projectId) {
       const agent = document.getElementById('agent-type');
       const skill = document.getElementById('skill-name');
       const cwd = document.getElementById('run-cwd');
+      persistAgentFormState(projectId, {
+        agent_type: agent.value,
+        skill_name: skill.value,
+        cwd: cwd.value,
+      });
       const response = await fetch('/api/runs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
