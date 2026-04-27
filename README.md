@@ -69,6 +69,7 @@ Included artifacts:
 - [Dockerfile](Dockerfile)
 - [render.yaml](render.yaml)
 - [backend/main.py](backend/main.py)
+- [docs/RENDER_DEPLOY_CHECKLIST.md](docs/RENDER_DEPLOY_CHECKLIST.md)
 
 ### Render
 
