@@ -303,6 +303,7 @@
           </select>
         </div>
       </div>
+      <div id="release-focus-chips" class="chips" style="margin-top:0; margin-bottom:12px"></div>
       <div id="operations-banner" class="banner-stack" style="margin-bottom:12px"></div>
       <div id="operations-list">Loading operations...</div>
     </section>
@@ -570,6 +571,40 @@
       filterSelect.value = allowed;
     }
 
+    function releaseFocusChipItems() {
+      return [
+        { value: 'all', label: 'All Releases' },
+        { value: 'risky', label: 'Needs Intervention' },
+        { value: 'rollbackable', label: 'Rollbackable' },
+        { value: 'fallback-cache', label: 'Cache Fallback' },
+        { value: 'stale-cache', label: 'Stale Cache' },
+      ];
+    }
+
+    function applyOperationsFilter(filterValue) {
+      const filterSelect = document.getElementById('operations-filter');
+      if (!filterSelect) {
+        return;
+      }
+      filterSelect.value = filterValue;
+      renderOperationsBoard();
+    }
+
+    function renderReleaseFocusChips(view, filter) {
+      const container = document.getElementById('release-focus-chips');
+      if (!container) {
+        return;
+      }
+      if (view !== 'releases') {
+        container.innerHTML = '';
+        return;
+      }
+      container.innerHTML = releaseFocusChipItems().map(item => {
+        const activeClass = item.value === filter ? ' medium' : '';
+        return `<button class="btn secondary chip${activeClass}" onclick="applyOperationsFilter('${escapeHtml(item.value)}')">${safeText(item.label)}</button>`;
+      }).join('');
+    }
+
     function renderOperationsBoard() {
       const view = document.getElementById('operations-view')?.value || 'runs';
       const filter = document.getElementById('operations-filter')?.value || 'all';
@@ -577,6 +612,7 @@
       if (!container) {
         return;
       }
+      renderReleaseFocusChips(view, filter);
       renderOperationsBanner(view);
 
       const items = view === 'deployments'
