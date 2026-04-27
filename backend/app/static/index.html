@@ -613,6 +613,20 @@
       renderOperationsBoard();
     }
 
+    function selectOperationsView(view, filterValue) {
+      const viewSelect = document.getElementById('operations-view');
+      if (!viewSelect) {
+        return;
+      }
+      viewSelect.value = view;
+      syncOperationsFilterOptions();
+      const filterSelect = document.getElementById('operations-filter');
+      if (filterSelect && filterValue) {
+        filterSelect.value = filterValue;
+      }
+      renderOperationsBoard();
+    }
+
     function renderReleaseFocusChips(view, filter) {
       const container = document.getElementById('release-focus-chips');
       if (!container) {
@@ -642,16 +656,19 @@
       const riskyReleases = operationsReleases.filter(item => String(item.release_health || '') === 'risky').length;
       const fallbackReleases = operationsReleases.filter(item => String(item.release_data_mode || '') === 'fallback-cache').length;
       const staleReleases = operationsReleases.filter(item => String(item.release_data_mode || '') === 'stale-cache').length;
-      container.innerHTML = [
-        `<span class="chip ${activeRuns ? 'medium' : ''}">Runs Active ${safeText(activeRuns)}</span>`,
-        `<span class="chip ${failedRuns ? 'high' : ''}">Runs Failed ${safeText(failedRuns)}</span>`,
-        `<span class="chip ${activeDeployments ? 'medium' : ''}">Deployments Active ${safeText(activeDeployments)}</span>`,
-        `<span class="chip ${failedDeployments ? 'high' : ''}">Deployments Failed ${safeText(failedDeployments)}</span>`,
-        `<span class="chip ${manualDeployments ? 'medium' : ''}">Deployments Manual ${safeText(manualDeployments)}</span>`,
-        `<span class="chip ${riskyReleases ? 'high' : ''}">Releases Risky ${safeText(riskyReleases)}</span>`,
-        `<span class="chip ${fallbackReleases ? 'high' : ''}">Releases Fallback ${safeText(fallbackReleases)}</span>`,
-        `<span class="chip ${staleReleases ? 'high' : ''}">Releases Stale ${safeText(staleReleases)}</span>`,
-      ].join('');
+      const items = [
+        { view: 'runs', filter: 'active', label: 'Runs Active', count: activeRuns, severity: activeRuns ? 'medium' : '' },
+        { view: 'runs', filter: 'failed', label: 'Runs Failed', count: failedRuns, severity: failedRuns ? 'high' : '' },
+        { view: 'deployments', filter: 'active', label: 'Deployments Active', count: activeDeployments, severity: activeDeployments ? 'medium' : '' },
+        { view: 'deployments', filter: 'failed', label: 'Deployments Failed', count: failedDeployments, severity: failedDeployments ? 'high' : '' },
+        { view: 'deployments', filter: 'manual', label: 'Deployments Manual', count: manualDeployments, severity: manualDeployments ? 'medium' : '' },
+        { view: 'releases', filter: 'risky', label: 'Releases Risky', count: riskyReleases, severity: riskyReleases ? 'high' : '' },
+        { view: 'releases', filter: 'fallback-cache', label: 'Releases Fallback', count: fallbackReleases, severity: fallbackReleases ? 'high' : '' },
+        { view: 'releases', filter: 'stale-cache', label: 'Releases Stale', count: staleReleases, severity: staleReleases ? 'high' : '' },
+      ];
+      container.innerHTML = items.map(item =>
+        `<button class="btn secondary chip ${safeText(item.severity)}" onclick="selectOperationsView('${escapeHtml(item.view)}', '${escapeHtml(item.filter)}')">${safeText(item.label)} ${safeText(item.count)}</button>`
+      ).join('');
     }
 
     function renderOperationsBoard() {
