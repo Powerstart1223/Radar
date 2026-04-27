@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: project-radar
+    env: docker
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: PROJECT_RADAR_HOST
+        value: 0.0.0.0
+      - key: PROJECT_RADAR_PORT
+        value: 10000
+      - key: PROJECT_RADAR_STORAGE_DIR
+        value: /var/data/project-radar
+    disk:
+      name: project-radar-data
+      mountPath: /var/data
+      sizeGB: 1

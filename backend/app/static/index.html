@@ -364,6 +364,7 @@
     const RELEASE_DETAILS_KEY = 'project-radar:release-details';
     const DEPLOYMENT_HISTORY_KEYS = 'project-radar:deployment-history-keys';
     const AGENT_FORM_STATE_KEY = 'project-radar:agent-form-state';
+    const SESSION_RESTORE_UPDATED_AT_KEY = 'project-radar:session-restore-updated-at';
 
     function safeEvidence(raw) {
       if (!raw) {
@@ -381,10 +382,27 @@
       return escapeHtml(normalized);
     }
 
+    function sessionRestoreTimestamp() {
+      try {
+        return window.localStorage.getItem(SESSION_RESTORE_UPDATED_AT_KEY);
+      } catch (_error) {
+        return null;
+      }
+    }
+
+    function touchSessionRestoreTimestamp() {
+      try {
+        window.localStorage.setItem(SESSION_RESTORE_UPDATED_AT_KEY, new Date().toISOString());
+      } catch (_error) {
+        // Ignore local storage failures and continue with in-memory UI state.
+      }
+    }
+
     function persistOperationsState(view, filter) {
       try {
         window.localStorage.setItem(OPERATIONS_VIEW_KEY, String(view || 'runs'));
         window.localStorage.setItem(OPERATIONS_FILTER_KEY, String(filter || 'all'));
+        touchSessionRestoreTimestamp();
       } catch (_error) {
         // Ignore local storage failures and continue with in-memory UI state.
       }
@@ -407,6 +425,7 @@
           return;
         }
         window.localStorage.setItem(SELECTED_PROJECT_KEY, String(projectId));
+        touchSessionRestoreTimestamp();
       } catch (_error) {
         // Ignore local storage failures and continue with in-memory UI state.
       }
@@ -432,6 +451,7 @@
           return;
         }
         window.localStorage.setItem(SELECTED_LOG_RUN_KEY, String(runId));
+        touchSessionRestoreTimestamp();
       } catch (_error) {
         // Ignore local storage failures and continue with in-memory UI state.
       }
@@ -457,6 +477,7 @@
           return;
         }
         window.localStorage.setItem(RELEASE_DETAILS_KEY, JSON.stringify(context));
+        touchSessionRestoreTimestamp();
       } catch (_error) {
         // Ignore local storage failures and continue with in-memory UI state.
       }
@@ -486,6 +507,7 @@
           return;
         }
         window.localStorage.setItem(DEPLOYMENT_HISTORY_KEYS, JSON.stringify(normalized));
+        touchSessionRestoreTimestamp();
       } catch (_error) {
         // Ignore local storage failures and continue with in-memory UI state.
       }
@@ -544,6 +566,7 @@
           cwd: String(state?.cwd || ''),
         };
         window.localStorage.setItem(AGENT_FORM_STATE_KEY, JSON.stringify(allState));
+        touchSessionRestoreTimestamp();
       } catch (_error) {
         // Ignore local storage failures and continue with in-memory UI state.
       }
@@ -581,6 +604,7 @@
         releaseContext,
         expandedHistories,
         agentForm,
+        updatedAt: sessionRestoreTimestamp(),
       };
     }
 
@@ -594,6 +618,7 @@
           RELEASE_DETAILS_KEY,
           DEPLOYMENT_HISTORY_KEYS,
           AGENT_FORM_STATE_KEY,
+          SESSION_RESTORE_UPDATED_AT_KEY,
         ].forEach(key => window.localStorage.removeItem(key));
       } catch (_error) {
         // Ignore local storage failures and continue with a best-effort reset.
@@ -637,6 +662,9 @@
         items.push(
           `<span class="chip">Agent Draft ${safeText(restoredSessionState.agentForm.agent_type)} / ${safeText(restoredSessionState.agentForm.skill_name || 'unspecified')}</span>`
         );
+      }
+      if (restoredSessionState.updatedAt) {
+        items.push(`<span class="chip">Saved ${safeText(restoredSessionState.updatedAt)}</span>`);
       }
       panel.style.display = '';
       container.innerHTML = `
