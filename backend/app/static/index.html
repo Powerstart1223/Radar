@@ -581,6 +581,28 @@
       ];
     }
 
+    function releaseFilterMatch(item, filter) {
+      if (filter === 'all') {
+        return true;
+      }
+      if (filter === 'failed') {
+        return isFailedRelease(item);
+      }
+      if (filter === 'risky') {
+        return String(item.release_health || '') === 'risky';
+      }
+      if (filter === 'rollbackable') {
+        return String(item.release_health || '') === 'rollbackable';
+      }
+      if (filter === 'current') {
+        return String(item.release_health || '') === 'current';
+      }
+      if (filter === 'fallback-cache' || filter === 'stale-cache' || filter === 'synced-cache' || filter === 'live-provider') {
+        return String(item.release_data_mode || '') === filter;
+      }
+      return false;
+    }
+
     function applyOperationsFilter(filterValue) {
       const filterSelect = document.getElementById('operations-filter');
       if (!filterSelect) {
@@ -601,7 +623,8 @@
       }
       container.innerHTML = releaseFocusChipItems().map(item => {
         const activeClass = item.value === filter ? ' medium' : '';
-        return `<button class="btn secondary chip${activeClass}" onclick="applyOperationsFilter('${escapeHtml(item.value)}')">${safeText(item.label)}</button>`;
+        const count = operationsReleases.filter(release => releaseFilterMatch(release, item.value)).length;
+        return `<button class="btn secondary chip${activeClass}" onclick="applyOperationsFilter('${escapeHtml(item.value)}')">${safeText(item.label)} (${safeText(count)})</button>`;
       }).join('');
     }
 
@@ -635,22 +658,7 @@
           return true;
         }
         if (view === 'releases') {
-          if (filter === 'failed') {
-            return isFailedRelease(item);
-          }
-          if (filter === 'risky') {
-            return String(item.release_health || '') === 'risky';
-          }
-          if (filter === 'rollbackable') {
-            return String(item.release_health || '') === 'rollbackable';
-          }
-          if (filter === 'current') {
-            return String(item.release_health || '') === 'current';
-          }
-          if (filter === 'fallback-cache' || filter === 'stale-cache' || filter === 'synced-cache' || filter === 'live-provider') {
-            return String(item.release_data_mode || '') === filter;
-          }
-          return filter === 'all';
+          return releaseFilterMatch(item, filter);
         }
         if (filter === 'active') {
           return isActiveDeployment(item);
