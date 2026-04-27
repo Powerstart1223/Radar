@@ -258,6 +258,12 @@
       <div class="panel card"><div class="label">Attention</div><div class="value" id="attention-count">0</div></div>
     </section>
 
+    <section class="panel" id="session-restore-panel" style="display:none">
+      <h2>Session Restore</h2>
+      <p>Radar restored your last operator context from local browser state.</p>
+      <div id="session-restore-banner"></div>
+    </section>
+
     <section class="panel">
       <h2>Status</h2>
       <pre id="status-json">Loading...</pre>
@@ -350,6 +356,7 @@
     let latestStatus = null;
     const deploymentHistoryCache = {};
     let selectedReleaseDetails = null;
+    let restoredSessionState = null;
     const OPERATIONS_VIEW_KEY = 'project-radar:operations-view';
     const OPERATIONS_FILTER_KEY = 'project-radar:operations-filter';
     const SELECTED_PROJECT_KEY = 'project-radar:selected-project-id';
@@ -546,6 +553,69 @@
       const allState = restoreAgentFormState();
       const key = String(projectId || '');
       return key && allState[key] && typeof allState[key] === 'object' ? allState[key] : null;
+    }
+
+    function summarizeRestoredSessionState() {
+      const operations = restoreOperationsState();
+      const projectId = restoreSelectedProject();
+      const runId = restoreSelectedLogRun();
+      const releaseContext = restoreReleaseDetailsContext();
+      const expandedHistories = restoreExpandedDeploymentHistories();
+      const agentForm = projectId ? projectAgentFormState(projectId) : null;
+      const hasState = Boolean(
+        projectId ||
+        runId ||
+        releaseContext ||
+        expandedHistories.length ||
+        agentForm ||
+        operations.view !== 'runs' ||
+        operations.filter !== 'all'
+      );
+      if (!hasState) {
+        return null;
+      }
+      return {
+        operations,
+        projectId,
+        runId,
+        releaseContext,
+        expandedHistories,
+        agentForm,
+      };
+    }
+
+    function renderSessionRestoreBanner() {
+      const panel = document.getElementById('session-restore-panel');
+      const container = document.getElementById('session-restore-banner');
+      if (!panel || !container) {
+        return;
+      }
+      if (!restoredSessionState) {
+        panel.style.display = 'none';
+        container.innerHTML = '';
+        return;
+      }
+      const items = [];
+      items.push(`<span class="chip medium">Operations ${safeText(restoredSessionState.operations.view)} / ${safeText(restoredSessionState.operations.filter)}</span>`);
+      if (restoredSessionState.projectId) {
+        items.push(`<span class="chip medium">Project Lane ${safeText(restoredSessionState.projectId)}</span>`);
+      }
+      if (restoredSessionState.runId) {
+        items.push(`<span class="chip">Run Log ${safeText(restoredSessionState.runId)}</span>`);
+      }
+      if (restoredSessionState.releaseContext) {
+        items.push(`<span class="chip">Release ${safeText(restoredSessionState.releaseContext.provider)} ${safeText(restoredSessionState.releaseContext.deploy_id)}</span>`);
+      }
+      if (restoredSessionState.expandedHistories.length) {
+        items.push(`<span class="chip">Deployment Histories ${safeText(restoredSessionState.expandedHistories.length)}</span>`);
+      }
+      if (restoredSessionState.agentForm) {
+        items.push(
+          `<span class="chip">Agent Draft ${safeText(restoredSessionState.agentForm.agent_type)} / ${safeText(restoredSessionState.agentForm.skill_name || 'unspecified')}</span>`
+        );
+      }
+      panel.style.display = '';
+      container.innerHTML = `<div class="chips">${items.join('')}</div>`;
     }
 
     async function loadCandidates() {
@@ -1713,6 +1783,7 @@
         loadProjectDetail(selectedProjectId);
       }
     }, 5000);
+    restoredSessionState = summarizeRestoredSessionState();
     const restoredOperations = restoreOperationsState();
     const operationsViewSelect = document.getElementById('operations-view');
     if (operationsViewSelect) {
@@ -1730,6 +1801,7 @@
       document.getElementById('operations-view')?.value || 'runs',
       document.getElementById('operations-filter')?.value || 'all'
     );
+    renderSessionRestoreBanner();
     loadSkills().then(loadStatus);
   </script>
 </body>
