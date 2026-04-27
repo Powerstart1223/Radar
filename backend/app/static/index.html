@@ -355,6 +355,7 @@
     const SELECTED_PROJECT_KEY = 'project-radar:selected-project-id';
     const SELECTED_LOG_RUN_KEY = 'project-radar:selected-log-run-id';
     const RELEASE_DETAILS_KEY = 'project-radar:release-details';
+    const DEPLOYMENT_HISTORY_KEYS = 'project-radar:deployment-history-keys';
 
     function safeEvidence(raw) {
       if (!raw) {
@@ -467,6 +468,46 @@
       } catch (_error) {
         return null;
       }
+    }
+
+    function persistExpandedDeploymentHistories(keys) {
+      try {
+        const normalized = Array.from(new Set((keys || []).map(value => String(value || '')).filter(Boolean)));
+        if (!normalized.length) {
+          window.localStorage.removeItem(DEPLOYMENT_HISTORY_KEYS);
+          return;
+        }
+        window.localStorage.setItem(DEPLOYMENT_HISTORY_KEYS, JSON.stringify(normalized));
+      } catch (_error) {
+        // Ignore local storage failures and continue with in-memory UI state.
+      }
+    }
+
+    function restoreExpandedDeploymentHistories() {
+      try {
+        const value = window.localStorage.getItem(DEPLOYMENT_HISTORY_KEYS);
+        if (!value) {
+          return [];
+        }
+        const parsed = JSON.parse(value);
+        return Array.isArray(parsed) ? parsed.map(item => String(item || '')).filter(Boolean) : [];
+      } catch (_error) {
+        return [];
+      }
+    }
+
+    function isDeploymentHistoryExpanded(projectId, provider) {
+      const key = deploymentHistoryKey(projectId, provider);
+      return restoreExpandedDeploymentHistories().includes(key);
+    }
+
+    function setDeploymentHistoryExpanded(projectId, provider, expanded) {
+      const key = deploymentHistoryKey(projectId, provider);
+      const current = restoreExpandedDeploymentHistories();
+      const next = expanded
+        ? Array.from(new Set([...current, key]))
+        : current.filter(item => item !== key);
+      persistExpandedDeploymentHistories(next);
     }
 
     async function loadCandidates() {
@@ -921,7 +962,10 @@
       }
       return `
         <div class="item">
-          <strong>History</strong>
+          <div class="item-header">
+            <strong>History</strong>
+            <button class="btn secondary" onclick="toggleDeploymentHistory(${projectId}, '${escapeHtml(provider)}')">Hide History</button>
+          </div>
           ${items.map(entry => `
             <div class="item">
               <div class="item-header">
@@ -946,6 +990,20 @@
           `).join('')}
         </div>
       `;
+    }
+
+    async function toggleDeploymentHistory(projectId, provider) {
+      const key = deploymentHistoryKey(projectId, provider);
+      if (deploymentHistoryCache[key]) {
+        delete deploymentHistoryCache[key];
+        setDeploymentHistoryExpanded(projectId, provider, false);
+        if (selectedProjectId === projectId) {
+          await loadProjectDetail(projectId);
+        }
+        return;
+      }
+      setDeploymentHistoryExpanded(projectId, provider, true);
+      await loadDeploymentHistory(projectId, provider);
     }
 
     function showReleaseDetails(provider, deployId, projectId) {
@@ -1151,7 +1209,7 @@
               <div class="actions" style="margin-top:0">
                 ${target.runnable ? `<button class="btn secondary" onclick="deployProject(${project.id})">Deploy</button>` : ''}
                 ${(target.actions || []).map(action => `<button class="btn secondary" onclick="runDeploymentAction(${project.id}, '${escapeHtml(target.provider)}', '${escapeHtml(action.id)}')">${safeText(action.label)}</button>`).join('')}
-                ${target.history_supported ? `<button class="btn secondary" onclick="loadDeploymentHistory(${project.id}, '${escapeHtml(target.provider)}')">History</button>` : ''}
+                ${target.history_supported ? `<button class="btn secondary" onclick="toggleDeploymentHistory(${project.id}, '${escapeHtml(target.provider)}')">${isDeploymentHistoryExpanded(project.id, String(target.provider || '')) || deploymentHistoryCache[deploymentHistoryKey(project.id, String(target.provider || ''))] ? 'Hide History' : 'History'}</button>` : ''}
                 ${target.management_url ? `<button class="btn secondary" onclick="openExternal('${escapeHtml(target.management_url)}')">Manage</button>` : ''}
               </div>
             </div>
@@ -1303,6 +1361,13 @@
         if (history && Array.isArray(history.items) && history.items.some(item => String(item.deploy_id || '') === String(releaseContext.deploy_id || ''))) {
           showReleaseDetails(releaseContext.provider, releaseContext.deploy_id, projectId);
         }
+      }
+      const expandedHistories = restoreExpandedDeploymentHistories()
+        .filter(key => key.startsWith(`${projectId}:`))
+        .map(key => key.split(':', 2)[1])
+        .filter(provider => provider && !deploymentHistoryCache[deploymentHistoryKey(projectId, provider)]);
+      for (const provider of expandedHistories) {
+        await loadDeploymentHistory(projectId, provider, false);
       }
     }
 
