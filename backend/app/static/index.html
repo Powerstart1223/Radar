@@ -550,6 +550,8 @@
                 ${item.updated_at ? `<span class="meta">updated ${safeText(item.updated_at)}</span><br>` : ''}
                 ${item.release_health ? `<span class="chip ${safeText(item.release_health)}">${safeText(item.release_health)}</span><br>` : ''}
                 ${item.health_reason ? `<span class="meta">${safeText(item.health_reason)}</span><br>` : ''}
+                ${item.release_data_mode ? `<span class="chip ${safeText(item.release_data_mode)}">${safeText(item.release_data_mode)}</span><br>` : ''}
+                ${item.release_data_reason ? `<span class="meta">${safeText(item.release_data_reason)}</span><br>` : ''}
                 ${item.release_sync_status ? `<span class="chip ${safeText(item.release_sync_status)}">${safeText(item.release_sync_status)}</span><br>` : ''}
                 ${item.release_sync_reason ? `<span class="meta">${safeText(item.release_sync_reason)}</span><br>` : ''}
                 <span class="meta">${safeText(item.summary, 'No summary')}</span>

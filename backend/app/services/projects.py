@@ -248,8 +248,9 @@ class ProjectService:
     def list_recent_releases(self, *, limit: int = 30, per_deployment_limit: int = 3) -> list[dict]:
         cached = self._load_release_snapshots(limit=limit)
         if cached:
-            return cached
-        return self._collect_recent_releases_live(limit=limit, per_deployment_limit=per_deployment_limit)
+            return self._annotate_cached_release_rows(cached, self.release_sync_status())
+        releases = self._collect_recent_releases_live(limit=limit, per_deployment_limit=per_deployment_limit)
+        return [self._attach_release_data_source_metadata(item, mode="live-provider") for item in releases]
 
     def sync_release_metadata(self, *, limit: int = 30) -> dict:
         releases = self._collect_recent_releases_live(limit=limit)
@@ -1184,6 +1185,40 @@ class ProjectService:
         item["release_sync_reason"] = sync_status.get("reason", "")
         return item
 
+    def _annotate_cached_release_rows(self, entries: list[dict], sync_status: dict) -> list[dict]:
+        mode = self._cached_release_data_mode(sync_status)
+        return [self._attach_release_data_source_metadata(item, mode=mode, sync_status=sync_status) for item in entries]
+
+    def _attach_release_data_source_metadata(self, entry: dict, *, mode: str, sync_status: dict | None = None) -> dict:
+        item = dict(entry)
+        item["release_data_mode"] = mode
+        item["release_data_reason"] = self._release_data_reason(mode, sync_status)
+        return item
+
+    def _cached_release_data_mode(self, sync_status: dict) -> str:
+        status = str(sync_status.get("status") or "unknown").strip().lower()
+        if status in {"live", "recent"}:
+            return "synced-cache"
+        if status == "error":
+            return "fallback-cache"
+        if status == "stale":
+            return "stale-cache"
+        return "unknown-cache"
+
+    def _release_data_reason(self, mode: str, sync_status: dict | None) -> str:
+        status_reason = ""
+        if sync_status:
+            status_reason = str(sync_status.get("reason") or "").strip()
+        if mode == "live-provider":
+            return "Loaded directly from provider APIs for this request."
+        if mode == "synced-cache":
+            return "Serving cached release snapshots from the latest successful provider sync."
+        if mode == "fallback-cache":
+            return status_reason or "Serving retained release snapshots because the latest provider sync failed."
+        if mode == "stale-cache":
+            return status_reason or "Serving retained release snapshots because provider sync is overdue."
+        return status_reason or "Serving retained release snapshots until provider sync completes."
+
     def _release_sync_status(self, row: dict | None) -> dict:
         if not row:
             return {
@@ -1364,6 +1399,8 @@ class ProjectService:
                     "release_sync_at": item.get("release_sync_at"),
                     "next_sync_due_at": item.get("next_sync_due_at"),
                     "release_sync_reason": item.get("release_sync_reason"),
+                    "release_data_mode": item.get("release_data_mode"),
+                    "release_data_reason": item.get("release_data_reason"),
                 }
             )
         return snapshots

@@ -522,6 +522,9 @@ class ProjectServiceDeploymentTests(unittest.TestCase):
 
     def test_list_recent_releases_uses_cached_snapshots(self) -> None:
         self.service = ProjectService(self.db, self.settings)
+        now = datetime.now(timezone.utc)
+        success_at = (now - timedelta(minutes=5)).isoformat()
+        next_due_at = (now + timedelta(minutes=10)).isoformat()
         self.service._store_release_snapshots(
             [
                 {
@@ -542,13 +545,21 @@ class ProjectServiceDeploymentTests(unittest.TestCase):
                     "release_health": "current",
                     "health_reason": "This is the active release.",
                     "release_sync_status": "live",
-                    "release_sync_at": "2026-04-26T23:05:00Z",
-                    "next_sync_due_at": "2026-04-26T23:20:00Z",
+                    "release_sync_at": success_at,
+                    "next_sync_due_at": next_due_at,
                     "release_sync_reason": "Release metadata is freshly synced.",
                 }
             ]
         )
         with self.db.connect() as conn:
+            conn.execute(
+                """
+                UPDATE sync_state
+                SET last_success_at = ?, last_error_at = NULL, last_error_summary = NULL
+                WHERE source = 'deploy'
+                """,
+                (success_at,),
+            )
             conn.execute(
                 """
                 INSERT INTO projects (id, display_name, primary_local_path, remote_url, default_branch, owner, status, source_confidence, created_at, updated_at)
@@ -562,7 +573,101 @@ class ProjectServiceDeploymentTests(unittest.TestCase):
 
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0]["deploy_id"], "dep-1")
+        self.assertEqual(result[0]["release_data_mode"], "synced-cache")
         live_collector.assert_not_called()
+
+    def test_list_recent_releases_marks_cached_fallback_when_sync_failed(self) -> None:
+        self.service = ProjectService(self.db, self.settings)
+        now = datetime.now(timezone.utc)
+        prior_success_at = (now - timedelta(minutes=30)).isoformat()
+        error_at = (now - timedelta(minutes=1)).isoformat()
+        self.service._store_release_snapshots(
+            [
+                {
+                    "project_id": 1,
+                    "provider": "render",
+                    "environment": "production",
+                    "service_name": "radar-api",
+                    "management_url": "https://dashboard.render.com/web/srv-123",
+                    "deploy_id": "dep-2",
+                    "state": "failed",
+                    "raw_state": "build_failed",
+                    "updated_at": "2026-04-26T23:00:00Z",
+                    "url": "https://radar-api.onrender.com",
+                    "summary": "failed deploy",
+                    "is_current": False,
+                    "details": {"provider": "render"},
+                    "actions": [],
+                    "release_health": "risky",
+                    "health_reason": "Deploy failed.",
+                    "release_sync_status": "live",
+                    "release_sync_at": prior_success_at,
+                    "next_sync_due_at": (now - timedelta(minutes=15)).isoformat(),
+                    "release_sync_reason": "Release metadata is freshly synced.",
+                }
+            ]
+        )
+        with self.db.connect() as conn:
+            conn.execute(
+                """
+                UPDATE sync_state
+                SET last_success_at = ?,
+                    last_error_at = ?,
+                    last_error_summary = 'provider timeout'
+                WHERE source = 'deploy'
+                """,
+                (prior_success_at, error_at),
+            )
+            conn.execute(
+                """
+                INSERT INTO projects (id, display_name, primary_local_path, remote_url, default_branch, owner, status, source_confidence, created_at, updated_at)
+                VALUES (1, 'Radar', '', '', '', '', 'confirmed', 1.0, '2026-04-26T00:00:00Z', '2026-04-26T00:00:00Z')
+                """
+            )
+            conn.commit()
+
+        result = self.service.list_recent_releases(limit=10)
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["release_data_mode"], "fallback-cache")
+        self.assertEqual(result[0]["release_data_reason"], "provider timeout")
+
+    def test_list_recent_releases_marks_live_provider_when_not_cached(self) -> None:
+        self.service = ProjectService(self.db, self.settings)
+        with patch.object(
+            self.service,
+            "_collect_recent_releases_live",
+            return_value=[
+                {
+                    "project_id": 1,
+                    "display_name": "Radar",
+                    "provider": "netlify",
+                    "environment": "production",
+                    "service_name": "radar-site",
+                    "management_url": "https://app.netlify.com/sites/radar-site",
+                    "deploy_id": "dep-live",
+                    "state": "finished",
+                    "raw_state": "ready",
+                    "updated_at": "2026-04-26T23:10:00Z",
+                    "url": "https://radar-site.netlify.app",
+                    "summary": "production",
+                    "is_current": True,
+                    "details": {"provider": "netlify"},
+                    "actions": [],
+                    "release_health": "current",
+                    "health_reason": "This is the active release.",
+                    "release_sync_status": "live",
+                    "release_sync_at": "2026-04-26T23:10:00Z",
+                    "next_sync_due_at": "2026-04-26T23:25:00Z",
+                    "release_sync_reason": "Release metadata is freshly synced.",
+                }
+            ],
+        ):
+            result = self.service.list_recent_releases(limit=10)
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["release_data_mode"], "live-provider")
+        self.assertIn("Loaded directly from provider APIs", result[0]["release_data_reason"])
 
     def test_store_release_snapshots_replaces_matching_release_key(self) -> None:
         self.service = ProjectService(self.db, self.settings)
