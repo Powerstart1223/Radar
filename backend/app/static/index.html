@@ -352,6 +352,7 @@
     let selectedReleaseDetails = null;
     const OPERATIONS_VIEW_KEY = 'project-radar:operations-view';
     const OPERATIONS_FILTER_KEY = 'project-radar:operations-filter';
+    const SELECTED_PROJECT_KEY = 'project-radar:selected-project-id';
 
     function safeEvidence(raw) {
       if (!raw) {
@@ -385,6 +386,31 @@
         return { view, filter };
       } catch (_error) {
         return { view: 'runs', filter: 'all' };
+      }
+    }
+
+    function persistSelectedProject(projectId) {
+      try {
+        if (projectId === null || projectId === undefined || projectId === '') {
+          window.localStorage.removeItem(SELECTED_PROJECT_KEY);
+          return;
+        }
+        window.localStorage.setItem(SELECTED_PROJECT_KEY, String(projectId));
+      } catch (_error) {
+        // Ignore local storage failures and continue with in-memory UI state.
+      }
+    }
+
+    function restoreSelectedProject() {
+      try {
+        const value = window.localStorage.getItem(SELECTED_PROJECT_KEY);
+        if (!value) {
+          return null;
+        }
+        const parsed = Number.parseInt(value, 10);
+        return Number.isNaN(parsed) ? null : parsed;
+      } catch (_error) {
+        return null;
       }
     }
 
@@ -990,15 +1016,19 @@
         container.innerHTML = '<p>No confirmed projects yet.</p>';
         document.getElementById('project-detail').innerHTML = '<p>Select a project.</p>';
         selectedProjectId = null;
+        persistSelectedProject(null);
         return;
       }
 
       if (preferredProjectId) {
         selectedProjectId = preferredProjectId;
+      } else if (!selectedProjectId) {
+        selectedProjectId = restoreSelectedProject();
       }
       if (!selectedProjectId || !items.some(item => item.id === selectedProjectId)) {
         selectedProjectId = items[0].id;
       }
+      persistSelectedProject(selectedProjectId);
 
       container.innerHTML = items.map(item => `
         <div class="item">
@@ -1026,6 +1056,8 @@
     }
 
     async function loadProjectDetail(projectId) {
+      selectedProjectId = projectId;
+      persistSelectedProject(projectId);
       const response = await fetch(`/api/projects/${projectId}`);
       const project = await response.json();
       const aliases = (project.aliases || [])
@@ -1210,6 +1242,7 @@
 
     async function selectProject(projectId) {
       selectedProjectId = projectId;
+      persistSelectedProject(projectId);
       await loadProjects(projectId);
     }
 
