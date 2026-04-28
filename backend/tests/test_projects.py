@@ -813,5 +813,233 @@ class ProjectServiceDeploymentTests(unittest.TestCase):
         loop.assert_called_once()
 
 
+class ProjectServiceSessionTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.base_dir = Path(self.temp_dir.name)
+        self.db = Database(self.base_dir / "project_radar.db")
+        self.db.init()
+        self.settings = Settings(
+            app_name="Project Radar",
+            app_host="127.0.0.1",
+            app_port=8787,
+            base_dir=self.base_dir,
+            storage_dir=self.base_dir / "storage",
+            artifacts_dir=self.base_dir / "storage" / "artifacts",
+            logs_dir=self.base_dir / "storage" / "logs",
+            db_path=self.base_dir / "project_radar.db",
+            codex_sessions_root=self.base_dir / "codex",
+            openclaw_sessions_root=self.base_dir / "openclaw",
+            github_token="",
+            vercel_token="",
+            netlify_token="",
+            render_token="",
+        )
+        self.service = ProjectService(self.db, self.settings)
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def test_sync_codex_activity_attaches_current_session_to_project(self) -> None:
+        repo = self.base_dir / "project-radar"
+        repo.mkdir()
+        session_dir = self.settings.codex_sessions_root
+        session_dir.mkdir(parents=True)
+        session_file = session_dir / "session-1.jsonl"
+        session_file.write_text(
+            '{"payload":{"cwd":"%s","id":"11111111-1111-1111-1111-111111111111"}}\n'
+            % str(repo).replace("\\", "\\\\"),
+            encoding="utf-8",
+        )
+
+        with self.db.connect() as conn:
+            now = "2026-04-26T00:00:00+00:00"
+            conn.execute(
+                """
+                INSERT INTO projects
+                (id, display_name, primary_local_path, remote_url, default_branch, owner, status, source_confidence, created_at, updated_at)
+                VALUES (1, 'project-radar', ?, '', 'main', 'local', 'confirmed', 1.0, ?, ?)
+                """,
+                (str(repo), now, now),
+            )
+            conn.execute(
+                """
+                INSERT INTO project_aliases (project_id, alias_type, alias_value, confidence)
+                VALUES (1, 'repo_path', ?, 1.0)
+                """,
+                (str(repo),),
+            )
+            conn.commit()
+
+        with patch.object(self.service, "_find_git_root", return_value=repo), patch.object(
+            self.service,
+            "_read_git_branch",
+            return_value="main",
+        ):
+            result = self.service.sync_codex_activity()
+
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["sessions"], 1)
+        project = self.service.get_project(1)
+        self.assertIsNotNone(project)
+        current_sessions = project["current_sessions"]
+        self.assertEqual(len(current_sessions), 1)
+        self.assertEqual(current_sessions[0]["source"], "codex")
+        self.assertEqual(current_sessions[0]["branch"], "main")
+        self.assertTrue(current_sessions[0]["is_current"])
+        self.assertIn("codex resume", current_sessions[0]["resume_command"])
+
+    def test_resume_project_session_launches_powershell(self) -> None:
+        repo = self.base_dir / "project-radar"
+        repo.mkdir()
+
+        with self.db.connect() as conn:
+            now = "2026-04-26T00:00:00+00:00"
+            conn.execute(
+                """
+                INSERT INTO projects
+                (id, display_name, primary_local_path, remote_url, default_branch, owner, status, source_confidence, created_at, updated_at)
+                VALUES (1, 'project-radar', ?, '', 'main', 'local', 'confirmed', 1.0, ?, ?)
+                """,
+                (str(repo), now, now),
+            )
+            conn.execute(
+                """
+                INSERT INTO project_sessions
+                (id, project_id, source, session_id, session_path, cwd, repo_path, branch, status,
+                 last_activity_at, summary, resume_command, open_command, is_current, created_at, updated_at)
+                VALUES (
+                    9, 1, 'codex', 'session-123', ?, ?, ?, 'main', 'current',
+                    ?, 'Codex current session', ?, ?, 1, ?, ?
+                )
+                """,
+                (
+                    str(self.base_dir / "codex" / "session-123.jsonl"),
+                    str(repo),
+                    str(repo),
+                    now,
+                    "codex resume 'session-123' -C '%s'" % str(repo).replace("'", "''"),
+                    str(self.base_dir / "codex" / "session-123.jsonl"),
+                    now,
+                    now,
+                ),
+            )
+            conn.commit()
+
+        with patch("app.services.projects.subprocess.Popen") as popen:
+            result = self.service.resume_project_session(1, 9)
+
+        self.assertEqual(result["status"], "launched")
+        self.assertEqual(result["session_id"], "session-123")
+        popen.assert_called_once()
+
+    def test_launch_project_codex_opens_terminal_in_project_path(self) -> None:
+        repo = self.base_dir / "project-radar"
+        repo.mkdir()
+
+        with self.db.connect() as conn:
+            now = "2026-04-26T00:00:00+00:00"
+            conn.execute(
+                """
+                INSERT INTO projects
+                (id, display_name, primary_local_path, remote_url, default_branch, owner, status, source_confidence, created_at, updated_at)
+                VALUES (1, 'project-radar', ?, '', 'main', 'local', 'confirmed', 1.0, ?, ?)
+                """,
+                (str(repo), now, now),
+            )
+            conn.commit()
+
+        with patch("app.services.projects.shutil.which", return_value="codex"), patch(
+            "app.services.projects.subprocess.Popen"
+        ) as popen:
+            result = self.service.launch_project_codex(1)
+
+        self.assertEqual(result["status"], "launched")
+        self.assertIn("codex -C", result["command"])
+        popen.assert_called_once()
+
+    def test_launch_project_openclaw_opens_terminal_in_project_path(self) -> None:
+        repo = self.base_dir / "project-radar"
+        repo.mkdir()
+
+        with self.db.connect() as conn:
+            now = "2026-04-26T00:00:00+00:00"
+            conn.execute(
+                """
+                INSERT INTO projects
+                (id, display_name, primary_local_path, remote_url, default_branch, owner, status, source_confidence, created_at, updated_at)
+                VALUES (1, 'project-radar', ?, '', 'main', 'local', 'confirmed', 1.0, ?, ?)
+                """,
+                (str(repo), now, now),
+            )
+            conn.commit()
+
+        with patch("app.services.projects.shutil.which", return_value="openclaw"), patch(
+            "app.services.projects.subprocess.Popen"
+        ) as popen:
+            result = self.service.launch_project_openclaw(1)
+
+        self.assertEqual(result["status"], "launched")
+        self.assertIn("openclaw --cwd", result["command"])
+        popen.assert_called_once()
+
+    def test_create_project_infers_git_metadata(self) -> None:
+        repo = self.base_dir / "project-radar"
+        repo.mkdir()
+        (repo / ".git").mkdir()
+
+        with patch.object(
+            self.service,
+            "_git_value",
+            side_effect=["https://github.com/acme/radar.git", "main", "main", "2026-04-26T00:00:00Z", "origin", "https://github.com/acme/radar.git"],
+        ), patch.object(self.service, "_git_has_uncommitted_changes", return_value=False):
+            result = self.service.create_project(display_name="", primary_local_path=str(repo))
+
+        self.assertEqual(result["status"], "created")
+        project = self.service.get_project(int(result["project_id"]))
+        self.assertEqual(project["display_name"], "project-radar")
+        self.assertEqual(project["remote_url"], "https://github.com/acme/radar.git")
+        self.assertEqual(project["default_branch"], "main")
+
+    def test_delete_project_removes_records_and_reopens_candidate(self) -> None:
+        repo = self.base_dir / "project-radar"
+        repo.mkdir()
+        with self.db.connect() as conn:
+            now = "2026-04-26T00:00:00+00:00"
+            conn.execute(
+                """
+                INSERT INTO projects
+                (id, display_name, primary_local_path, remote_url, default_branch, owner, status, source_confidence, created_at, updated_at)
+                VALUES (1, 'project-radar', ?, 'https://github.com/acme/radar.git', 'main', 'local', 'confirmed', 1.0, ?, ?)
+                """,
+                (str(repo), now, now),
+            )
+            conn.execute(
+                """
+                INSERT INTO project_aliases (project_id, alias_type, alias_value, confidence)
+                VALUES (1, 'repo_path', ?, 1.0)
+                """,
+                (str(repo),),
+            )
+            conn.execute(
+                """
+                INSERT INTO discovery_candidates
+                (id, candidate_type, display_name, source, evidence_json, confidence, review_status, created_at)
+                VALUES
+                (7, 'git_repo', 'project-radar', 'git_scan', ?, 0.95, 'confirmed', ?)
+                """,
+                ('{"repo_path":"%s","remote_url":"https://github.com/acme/radar.git"}' % str(repo).replace("\\", "\\\\"), now),
+            )
+            conn.commit()
+
+        result = self.service.delete_project(1)
+
+        self.assertEqual(result["status"], "deleted")
+        self.assertIsNone(self.service.get_project(1))
+        with self.db.connect() as conn:
+            row = conn.execute("SELECT review_status FROM discovery_candidates WHERE id = 7").fetchone()
+        self.assertEqual(row["review_status"], "pending")
+
+
 if __name__ == "__main__":
     unittest.main()

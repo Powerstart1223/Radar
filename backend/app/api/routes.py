@@ -35,6 +35,19 @@ def build_router(
     def list_projects() -> dict:
         return {"items": projects.list_projects()}
 
+    @router.post("/api/projects")
+    def create_project(payload: dict) -> dict:
+        try:
+            return projects.create_project(
+                display_name=str(payload.get("display_name") or ""),
+                primary_local_path=str(payload.get("primary_local_path") or ""),
+                remote_url=str(payload.get("remote_url") or ""),
+                default_branch=str(payload.get("default_branch") or ""),
+                owner=str(payload.get("owner") or "local"),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     @router.get("/api/attention")
     def list_attention() -> dict:
         return {"items": projects.list_attention_queue()}
@@ -66,6 +79,34 @@ def build_router(
     def refresh_project(project_id: int) -> dict:
         try:
             return projects.refresh_project_repo(project_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @router.post("/api/projects/{project_id}/sessions/{session_record_id}/resume")
+    def resume_project_session(project_id: int, session_record_id: int) -> dict:
+        try:
+            return projects.resume_project_session(project_id, session_record_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @router.post("/api/projects/{project_id}/launch/codex")
+    def launch_project_codex(project_id: int) -> dict:
+        try:
+            return projects.launch_project_codex(project_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @router.post("/api/projects/{project_id}/launch/openclaw")
+    def launch_project_openclaw(project_id: int) -> dict:
+        try:
+            return projects.launch_project_openclaw(project_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @router.delete("/api/projects/{project_id}")
+    def delete_project(project_id: int) -> dict:
+        try:
+            return projects.delete_project(project_id)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 

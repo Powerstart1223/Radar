@@ -26,6 +26,8 @@
       max-width: 1100px;
       margin: 0 auto;
       padding: 32px 20px 48px;
+      display: flex;
+      flex-direction: column;
     }
     .hero, .panel {
       background: var(--panel);
@@ -81,6 +83,28 @@
     .panel h2 {
       margin: 0 0 8px;
       font-size: 22px;
+    }
+    details.console-group {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #faf6ef;
+      padding: 12px 14px;
+      margin-bottom: 12px;
+    }
+    details.console-group[open] {
+      background: #fff9f1;
+    }
+    details.console-group > summary {
+      cursor: pointer;
+      font-weight: 700;
+      color: var(--ink);
+      list-style: none;
+    }
+    details.console-group > summary::-webkit-details-marker {
+      display: none;
+    }
+    .console-body {
+      margin-top: 12px;
     }
     .banner-stack {
       display: grid;
@@ -142,6 +166,11 @@
       gap: 16px;
       align-items: start;
     }
+    .project-board {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
     .item {
       border: 1px solid var(--line);
       border-radius: 12px;
@@ -181,6 +210,11 @@
     .chip.medium {
       border-color: var(--accent);
       color: var(--accent);
+    }
+    .chip.active-filter {
+      background: var(--accent);
+      color: white;
+      border-color: var(--accent);
     }
     .form-row {
       display: grid;
@@ -230,6 +264,9 @@
       .stack {
         grid-template-columns: 1fr;
       }
+      .project-board {
+        grid-template-columns: 1fr;
+      }
       h1 {
         font-size: 32px;
       }
@@ -251,11 +288,56 @@
       <button class="btn secondary" id="load-status">Refresh Status</button>
     </section>
 
+    <section class="stack" id="workspace-shell">
+      <div class="panel">
+        <h2>Workspace Board</h2>
+        <p>Every project is its own workspace. Pick one, launch Codex or OpenClaw into it, and work from that portal.</p>
+        <div class="form-row" style="grid-template-columns: 1fr 1.2fr; margin-top:0; margin-bottom:12px">
+          <div>
+            <label for="new-project-name">New Project Name</label>
+            <input id="new-project-name" placeholder="Optional, inferred from path if blank">
+          </div>
+          <div>
+            <label for="new-project-path">Project Path</label>
+            <input id="new-project-path" placeholder="C:\Users\SJK\Documents\my-project">
+          </div>
+        </div>
+        <div class="form-row" style="grid-template-columns: 1fr 1fr auto; margin-top:0; margin-bottom:12px">
+          <div>
+            <label for="new-project-remote">Remote URL</label>
+            <input id="new-project-remote" placeholder="Optional">
+          </div>
+          <div>
+            <label for="new-project-owner">Owner</label>
+            <input id="new-project-owner" value="local">
+          </div>
+          <div style="align-self:end">
+            <button class="btn" id="create-project">Create Project</button>
+          </div>
+        </div>
+        <div class="form-row" style="grid-template-columns: 1fr; margin-top:0; margin-bottom:12px">
+          <div>
+            <label for="project-search">Workspace Search</label>
+            <input id="project-search" placeholder="Filter by name, path, branch, deployment provider, or attention">
+          </div>
+        </div>
+        <div id="project-summary" class="chips" style="margin-bottom:12px"></div>
+        <div id="board-action-status" style="margin-bottom:12px"></div>
+        <div id="project-filters" class="chips" style="margin-bottom:12px"></div>
+        <div id="project-list">Loading workspaces...</div>
+      </div>
+
+      <div class="panel">
+        <h2>Workspace Portal</h2>
+        <div id="project-detail"><p>Select a workspace.</p></div>
+      </div>
+    </section>
+
     <section class="grid">
-      <div class="panel card"><div class="label">Projects</div><div class="value" id="projects">0</div></div>
-      <div class="panel card"><div class="label">Candidates</div><div class="value" id="candidates">0</div></div>
+      <div class="panel card"><div class="label">Workspaces</div><div class="value" id="projects">0</div></div>
+      <div class="panel card"><div class="label">Pending Discovery</div><div class="value" id="candidates">0</div></div>
       <div class="panel card"><div class="label">Runs</div><div class="value" id="runs">0</div></div>
-      <div class="panel card"><div class="label">Attention</div><div class="value" id="attention-count">0</div></div>
+      <div class="panel card"><div class="label">Workspace Alerts</div><div class="value" id="attention-count">0</div></div>
     </section>
 
     <section class="panel" id="session-restore-panel" style="display:none">
@@ -265,74 +347,75 @@
     </section>
 
     <section class="panel">
-      <h2>Status</h2>
-      <pre id="status-json">Loading...</pre>
-    </section>
+      <h2>Operator Console</h2>
+      <p>Secondary portfolio controls and global telemetry live here. Use this when you want the broad operator view instead of a single workspace.</p>
 
-    <section class="panel">
-      <h2>Sync Banners</h2>
-      <p>Source-specific sync failures surface here first, so operators can see stale or broken monitors without reading raw JSON.</p>
-      <div id="sync-banners">Loading sync state...</div>
-    </section>
-
-    <section class="panel">
-      <h2>Attention Queue</h2>
-      <p>The highest-value issues across all projects, derived from repo freshness, local state, PR signals, and recent agent runs.</p>
-      <div id="attention-list">Loading attention...</div>
-    </section>
-
-    <section class="panel">
-      <h2>Global Activity Feed</h2>
-      <p>Recent cross-project Codex and OpenClaw activity captured from local session stores.</p>
-      <div id="activity-list">Loading activity...</div>
-    </section>
-
-    <section class="panel">
-      <h2>Operations Board</h2>
-      <p>Portfolio-wide runs and deployment states, with fast filtering for active and broken work.</p>
-      <div class="form-row">
-        <div>
-          <label for="operations-view">View</label>
-          <select id="operations-view">
-            <option value="runs">Runs</option>
-            <option value="deployments">Deployments</option>
-            <option value="releases">Releases</option>
-          </select>
+      <details class="console-group">
+        <summary>Status</summary>
+        <div class="console-body">
+          <div id="operator-status">Loading...</div>
         </div>
-        <div>
-          <label for="operations-filter">Filter</label>
-          <select id="operations-filter">
-            <option value="all">All</option>
-            <option value="active">Active</option>
-            <option value="failed">Failed</option>
-            <option value="manual">Manual Only</option>
-          </select>
+      </details>
+
+      <details class="console-group">
+        <summary>Sync Banners</summary>
+        <div class="console-body">
+          <p>Source-specific sync failures surface here first, so operators can see stale or broken monitors without reading raw JSON.</p>
+          <div id="sync-banners">Loading sync state...</div>
         </div>
-      </div>
-      <div id="operations-summary" class="chips" style="margin-top:0; margin-bottom:12px"></div>
-      <div id="release-focus-chips" class="chips" style="margin-top:0; margin-bottom:12px"></div>
-      <div id="operations-banner" class="banner-stack" style="margin-bottom:12px"></div>
-      <div id="operations-list">Loading operations...</div>
+      </details>
+
+      <details class="console-group">
+        <summary>Global Activity Feed</summary>
+        <div class="console-body">
+          <p>Recent cross-project Codex and OpenClaw activity captured from local session stores.</p>
+          <div id="activity-list">Loading activity...</div>
+        </div>
+      </details>
+
+      <details class="console-group">
+        <summary>Operations Board</summary>
+        <div class="console-body">
+          <p>Portfolio-wide runs and deployment states, with fast filtering for active and broken work.</p>
+          <div class="form-row">
+            <div>
+              <label for="operations-view">View</label>
+              <select id="operations-view">
+                <option value="runs">Runs</option>
+                <option value="deployments">Deployments</option>
+                <option value="releases">Releases</option>
+              </select>
+            </div>
+            <div>
+              <label for="operations-filter">Filter</label>
+              <select id="operations-filter">
+                <option value="all">All</option>
+                <option value="active">Active</option>
+                <option value="failed">Failed</option>
+                <option value="manual">Manual Only</option>
+              </select>
+            </div>
+          </div>
+          <div id="operations-summary" class="chips" style="margin-top:0; margin-bottom:12px"></div>
+          <div id="release-focus-chips" class="chips" style="margin-top:0; margin-bottom:12px"></div>
+          <div id="operations-banner" class="banner-stack" style="margin-bottom:12px"></div>
+          <div id="operations-list">Loading operations...</div>
+        </div>
+      </details>
+
+      <details class="console-group">
+        <summary>Discovery Review</summary>
+        <div class="console-body">
+          <p>Pending candidates can be confirmed into canonical projects. This is the first review queue, not the final UI.</p>
+          <div class="actions" style="margin-top:0; margin-bottom:12px">
+            <button class="btn secondary" id="confirm-git-candidates">Confirm Git Repos</button>
+          </div>
+          <div id="candidate-summary" class="chips" style="margin-bottom:12px"></div>
+          <div id="candidate-list">Loading candidates...</div>
+        </div>
+      </details>
     </section>
 
-    <section class="panel">
-      <h2>Discovery Review</h2>
-      <p>Pending candidates can be confirmed into canonical projects. This is the first review queue, not the final UI.</p>
-      <div id="candidate-list">Loading candidates...</div>
-    </section>
-
-    <section class="stack">
-      <div class="panel">
-        <h2>Projects</h2>
-        <p>Confirmed projects become separate operating lanes here. Select one to inspect its current repo state and discovery evidence.</p>
-        <div id="project-list">Loading projects...</div>
-      </div>
-
-      <div class="panel">
-        <h2>Project Detail</h2>
-        <div id="project-detail"><p>Select a project.</p></div>
-      </div>
-    </section>
   </div>
   <div id="release-modal" class="modal-backdrop" onclick="closeReleaseDetails(event)">
     <div class="modal-panel" onclick="event.stopPropagation()">
@@ -354,6 +437,12 @@
     let operationsDeployments = [];
     let operationsReleases = [];
     let latestStatus = null;
+    let latestCandidates = [];
+    let latestProjects = [];
+    let projectFilter = 'all';
+    let boardActionState = null;
+    let workspaceActionState = null;
+    let operatorActionState = null;
     const deploymentHistoryCache = {};
     let selectedReleaseDetails = null;
     let restoredSessionState = null;
@@ -380,6 +469,188 @@
     function safeText(value, fallback = '') {
       const normalized = value === null || value === undefined || value === '' ? fallback : String(value);
       return escapeHtml(normalized);
+    }
+
+    function renderActionState(state, fallback = '') {
+      if (!state) {
+        return fallback;
+      }
+      const severity = ['high', 'medium'].includes(String(state.severity || '')) ? String(state.severity) : '';
+      const details = Array.isArray(state.details) ? state.details.filter(Boolean) : [];
+      return `
+        <div class="banner ${severity}">
+          <strong>${safeText(state.title || 'Update')}</strong><br>
+          <span class="meta">${safeText(state.summary || '')}</span>
+          ${details.length ? `<div class="chips" style="margin-top:10px">${details.map(item => `<span class="chip ${severity}">${safeText(item)}</span>`).join('')}</div>` : ''}
+        </div>
+      `;
+    }
+
+    function setBoardActionState(state) {
+      boardActionState = state;
+      const container = document.getElementById('board-action-status');
+      if (!container) {
+        return;
+      }
+      container.innerHTML = renderActionState(state);
+    }
+
+    function setOperatorActionState(state) {
+      operatorActionState = state;
+      const container = document.getElementById('operator-status');
+      if (!container) {
+        return;
+      }
+      container.innerHTML = renderActionState(state, '<p>No operator action recorded yet.</p>');
+    }
+
+    function setWorkspaceActionState(projectId, state) {
+      workspaceActionState = {
+        projectId,
+        ...(state || {}),
+      };
+      if (selectedProjectId === projectId) {
+        loadProjectDetail(projectId);
+      }
+    }
+
+    function workspaceActionMarkup(projectId) {
+      if (!workspaceActionState || workspaceActionState.projectId !== projectId) {
+        return '';
+      }
+      return `
+        <div class="item">
+          <strong>Workspace Action</strong>
+          ${renderActionState(workspaceActionState)}
+        </div>
+      `;
+    }
+
+    function candidatePriority(item) {
+      const source = String(item?.source || '');
+      if (source === 'git_scan') {
+        return 0;
+      }
+      if (source === 'codex_session') {
+        return 1;
+      }
+      if (source === 'openclaw_session') {
+        return 2;
+      }
+      return 3;
+    }
+
+    function parseCandidateEvidence(raw) {
+      if (!raw) {
+        return {};
+      }
+      try {
+        const value = JSON.parse(raw);
+        return value && typeof value === 'object' ? value : {};
+      } catch (_error) {
+        return {};
+      }
+    }
+
+    function isMeaningfulCandidate(item) {
+      const source = String(item?.source || '');
+      if (source === 'git_scan') {
+        return true;
+      }
+      const evidence = parseCandidateEvidence(item?.evidence_json);
+      const repoPath = String(evidence.repo_path || '').trim();
+      if (!repoPath) {
+        return false;
+      }
+      const normalized = repoPath.toLowerCase();
+      return !normalized.includes('\\.codex\\') && !normalized.includes('\\.openclaw\\');
+    }
+
+    function renderCandidateSummary(items, hiddenCount = 0) {
+      const container = document.getElementById('candidate-summary');
+      if (!container) {
+        return;
+      }
+      if (!items.length) {
+        container.innerHTML = '';
+        return;
+      }
+      const counts = items.reduce((acc, item) => {
+        const key = String(item.source || 'unknown');
+        acc[key] = (acc[key] || 0) + 1;
+        return acc;
+      }, {});
+      const gitRepos = items.filter(item => String(item.source || '') === 'git_scan').length;
+      container.innerHTML = [
+        `<span class="chip">pending ${safeText(items.length)}</span>`,
+        `<span class="chip">git repos ${safeText(gitRepos)}</span>`,
+        hiddenCount ? `<span class="chip">hidden noisy ${safeText(hiddenCount)}</span>` : '',
+        ...Object.entries(counts).map(([source, count]) => `<span class="chip">${safeText(source)} ${safeText(count)}</span>`),
+      ].join('');
+    }
+
+    function projectMatchesFilter(item, filter) {
+      if (filter === 'attention') {
+        return Number(item.attention_count || 0) > 0;
+      }
+      if (filter === 'deploy') {
+        return (item.deployments || []).length > 0;
+      }
+      if (filter === 'sessions') {
+        return (item.current_sessions || []).length > 0;
+      }
+      if (filter === 'dirty') {
+        return Boolean(item.has_uncommitted_changes);
+      }
+      if (filter === 'clean') {
+        return !item.has_uncommitted_changes;
+      }
+      return true;
+    }
+
+    function renderProjectFilters(items) {
+      const container = document.getElementById('project-filters');
+      if (!container) {
+        return;
+      }
+      const definitions = [
+        { value: 'all', label: 'All', count: items.length },
+        { value: 'attention', label: 'Needs Attention', count: items.filter(item => Number(item.attention_count || 0) > 0).length },
+        { value: 'deploy', label: 'Deploys', count: items.filter(item => (item.deployments || []).length > 0).length },
+        { value: 'sessions', label: 'Sessions', count: items.filter(item => (item.current_sessions || []).length > 0).length },
+        { value: 'dirty', label: 'Dirty', count: items.filter(item => item.has_uncommitted_changes).length },
+        { value: 'clean', label: 'Clean', count: items.filter(item => !item.has_uncommitted_changes).length },
+      ];
+      container.innerHTML = definitions
+        .map(item => `<button class="btn secondary chip ${projectFilter === item.value ? 'active-filter' : ''}" onclick="setProjectFilter('${escapeHtml(item.value)}')">${safeText(item.label)} ${safeText(item.count)}</button>`)
+        .join('');
+    }
+
+    function projectFocusLabel(item) {
+      if ((item.current_sessions || []).length) {
+        return 'Resume active work';
+      }
+      if (Number(item.attention_count || 0) > 0) {
+        return 'Resolve workspace alerts';
+      }
+      if ((item.deployments || []).length) {
+        return 'Check deployment';
+      }
+      return 'Open in Codex';
+    }
+
+    function agentModeLabel(project) {
+      const currentSources = project.runtime_summary?.current_session_sources || [];
+      if (currentSources.includes('codex') && currentSources.includes('openclaw')) {
+        return 'Both agents are already attached to this workspace.';
+      }
+      if (currentSources.includes('codex')) {
+        return 'Codex is the current attached session for this workspace.';
+      }
+      if (currentSources.includes('openclaw')) {
+        return 'OpenClaw is the current attached session for this workspace.';
+      }
+      return 'No session is attached yet. Launch either agent directly into this workspace.';
     }
 
     function sessionRestoreTimestamp() {
@@ -647,7 +918,7 @@
       const items = [];
       items.push(`<span class="chip medium">Operations ${safeText(restoredSessionState.operations.view)} / ${safeText(restoredSessionState.operations.filter)}</span>`);
       if (restoredSessionState.projectId) {
-        items.push(`<span class="chip medium">Project Lane ${safeText(restoredSessionState.projectId)}</span>`);
+        items.push(`<span class="chip medium">Workspace ${safeText(restoredSessionState.projectId)}</span>`);
       }
       if (restoredSessionState.runId) {
         items.push(`<span class="chip">Run Log ${safeText(restoredSessionState.runId)}</span>`);
@@ -678,8 +949,24 @@
     async function loadCandidates() {
       const response = await fetch('/api/discovery/candidates');
       const data = await response.json();
-      const pending = data.items.filter(item => item.review_status === 'pending');
+      const allPending = (data.items || [])
+        .filter(item => item.review_status === 'pending');
+      const pending = allPending
+        .filter(item => isMeaningfulCandidate(item))
+        .sort((a, b) => {
+          const priorityDelta = candidatePriority(a) - candidatePriority(b);
+          if (priorityDelta !== 0) {
+            return priorityDelta;
+          }
+          const confidenceDelta = Number(b.confidence || 0) - Number(a.confidence || 0);
+          if (confidenceDelta !== 0) {
+            return confidenceDelta;
+          }
+          return String(a.display_name || '').localeCompare(String(b.display_name || ''));
+        });
+      latestCandidates = pending;
       const container = document.getElementById('candidate-list');
+      renderCandidateSummary(pending, allPending.length - pending.length);
       if (!pending.length) {
         container.innerHTML = '<p>No pending candidates.</p>';
         return;
@@ -702,33 +989,6 @@
       }).join('');
     }
 
-    async function loadAttention() {
-      const response = await fetch('/api/attention');
-      const data = await response.json();
-      const items = data.items || [];
-      const container = document.getElementById('attention-list');
-      if (!items.length) {
-        container.innerHTML = '<p>No active attention items.</p>';
-        return;
-      }
-      container.innerHTML = items.map(item => `
-        <div class="item">
-          <div class="item-header">
-            <div>
-              <strong>${safeText(item.display_name)}</strong><br>
-              <span class="meta">${safeText(item.title)}</span><br>
-              <span class="meta">${safeText(item.detail)}</span>
-            </div>
-            <button class="btn secondary" onclick="selectProject(${item.project_id})">Open Project</button>
-          </div>
-          <div class="chips">
-            <span class="chip ${safeText(item.severity)}">${safeText(item.severity)}</span>
-            <span class="chip">${safeText(item.type)}</span>
-          </div>
-        </div>
-      `).join('');
-    }
-
     async function loadActivity() {
       const response = await fetch('/api/activity');
       const data = await response.json();
@@ -747,7 +1007,7 @@
               <span class="meta">${safeText(item.occurred_at)}</span><br>
               <span class="meta">${safeText(item.summary, 'No summary')}</span>
             </div>
-            ${item.project_id ? `<button class="btn secondary" onclick="selectProject(${item.project_id})">Open Project</button>` : ''}
+            ${item.project_id ? `<button class="btn secondary" onclick="selectProject(${item.project_id})">Open Workspace</button>` : ''}
           </div>
         </div>
       `).join('');
@@ -1043,7 +1303,7 @@
                 <span class="meta">${safeText(item.status)} - ${safeText(item.started_at)}</span><br>
                 <span class="meta">${safeText(item.output_summary, 'No summary yet')}</span>
               </div>
-              ${item.project_id ? `<button class="btn secondary" onclick="selectProject(${item.project_id})">Open Project</button>` : ''}
+              ${item.project_id ? `<button class="btn secondary" onclick="selectProject(${item.project_id})">Open Workspace</button>` : ''}
             </div>
           </div>
         `).join('');
@@ -1071,7 +1331,7 @@
                 ${item.is_current ? `<br><span class="meta">current deployment</span>` : ''}
               </div>
               <div class="actions" style="margin-top:0">
-                ${item.project_id ? `<button class="btn secondary" onclick="selectProject(${item.project_id})">Open Project</button>` : ''}
+                ${item.project_id ? `<button class="btn secondary" onclick="selectProject(${item.project_id})">Open Workspace</button>` : ''}
                 <button class="btn secondary" onclick="showGlobalReleaseDetails('${escapeHtml(item.provider)}', '${escapeHtml(item.deploy_id || '')}', ${item.project_id})">Details</button>
                 ${(item.actions || []).map(action => `<button class="btn secondary" onclick="runDeploymentAction(${item.project_id}, '${escapeHtml(item.provider)}', '${escapeHtml(action.id)}', '${escapeHtml(item.deploy_id || '')}')">${safeText(action.label)}</button>`).join('')}
                 ${item.management_url ? `<button class="btn secondary" onclick="openExternal('${escapeHtml(item.management_url)}')">Manage</button>` : ''}
@@ -1095,7 +1355,7 @@
               ${item.url ? `<br><span class="meta">${safeText(item.url)}</span>` : ''}
             </div>
             <div class="actions" style="margin-top:0">
-              ${item.project_id ? `<button class="btn secondary" onclick="selectProject(${item.project_id})">Open Project</button>` : ''}
+              ${item.project_id ? `<button class="btn secondary" onclick="selectProject(${item.project_id})">Open Workspace</button>` : ''}
               ${item.project_id && item.runnable ? `<button class="btn secondary" onclick="deployProject(${item.project_id})">Deploy</button>` : ''}
               ${(item.actions || []).map(action => `<button class="btn secondary" onclick="runDeploymentAction(${item.project_id}, '${escapeHtml(item.provider)}', '${escapeHtml(action.id)}')">${safeText(action.label)}</button>`).join('')}
               ${item.management_url ? `<button class="btn secondary" onclick="openExternal('${escapeHtml(item.management_url)}')">Manage</button>` : ''}
@@ -1284,13 +1544,64 @@
     async function loadProjects(preferredProjectId) {
       const response = await fetch('/api/projects');
       const data = await response.json();
-      const items = data.items || [];
+      latestProjects = data.items || [];
+      renderProjectFilters(latestProjects);
+      const searchValue = (document.getElementById('project-search')?.value || '').trim().toLowerCase();
+      const items = latestProjects
+        .filter(item => projectMatchesFilter(item, projectFilter))
+        .filter(item => {
+          if (!searchValue) {
+            return true;
+          }
+        const haystack = [
+          item.display_name,
+          item.primary_local_path,
+          item.remote_url,
+          item.branch,
+          item.pr_state,
+          item.checks_state,
+          item.attention_severity,
+          ...(item.deployments || []).map(target => `${target.provider} ${target.environment} ${target.state}`),
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+        return haystack.includes(searchValue);
+        })
+        .sort((a, b) => {
+          const attentionDelta = Number(b.attention_count || 0) - Number(a.attention_count || 0);
+          if (attentionDelta !== 0) {
+            return attentionDelta;
+          }
+          const sessionDelta = Number((b.current_sessions || []).length) - Number((a.current_sessions || []).length);
+          if (sessionDelta !== 0) {
+            return sessionDelta;
+          }
+          const deploymentDelta = Number((b.deployments || []).length) - Number((a.deployments || []).length);
+          if (deploymentDelta !== 0) {
+            return deploymentDelta;
+          }
+          return String(a.display_name || '').localeCompare(String(b.display_name || ''));
+        });
       const container = document.getElementById('project-list');
+      const summary = document.getElementById('project-summary');
+      if (summary) {
+        const mediumOrHigher = latestProjects.filter(item => ['medium', 'high'].includes(String(item.attention_severity || ''))).length;
+        summary.innerHTML = [
+          `<span class="chip">visible ${safeText(items.length)}</span>`,
+          `<span class="chip">workspaces ${safeText(latestProjects.length)}</span>`,
+          `<span class="chip">workspace alerts ${safeText(mediumOrHigher)}</span>`,
+        ].join('');
+      }
       if (!items.length) {
-        container.innerHTML = '<p>No confirmed projects yet.</p>';
-        document.getElementById('project-detail').innerHTML = '<p>Select a project.</p>';
-        selectedProjectId = null;
-        persistSelectedProject(null);
+        container.innerHTML = latestProjects.length
+          ? '<p>No workspaces match the current filter.</p>'
+          : '<p>No workspaces yet.</p>';
+        if (!latestProjects.length) {
+          document.getElementById('project-detail').innerHTML = '<p>Select a workspace.</p>';
+          selectedProjectId = null;
+          persistSelectedProject(null);
+        }
         return;
       }
 
@@ -1304,27 +1615,35 @@
       }
       persistSelectedProject(selectedProjectId);
 
-      container.innerHTML = items.map(item => `
+      container.innerHTML = `<div class="project-board">${items.map(item => `
         <div class="item">
           <div class="item-header">
             <div>
               <strong>${safeText(item.display_name)}</strong><br>
               <span class="meta">${safeText(item.primary_local_path, 'No local path yet')}</span>
             </div>
-            <button class="btn ${selectedProjectId === item.id ? '' : 'secondary'}" onclick="selectProject(${item.id})">
-              ${selectedProjectId === item.id ? 'Selected' : 'Open'}
-            </button>
+            <div class="actions" style="margin-top:0">
+              <button class="btn ${selectedProjectId === item.id ? '' : 'secondary'}" onclick="selectProject(${item.id})">
+                ${selectedProjectId === item.id ? 'Active' : 'Open Workspace'}
+              </button>
+              <button class="btn secondary" onclick="launchProjectCodex(${item.id})">Codex</button>
+              <button class="btn secondary" onclick="launchProjectOpenClaw(${item.id})">OpenClaw</button>
+            </div>
           </div>
+          <div class="meta" style="margin-top:10px">${safeText(projectFocusLabel(item))}</div>
           <div class="chips">
-            <span class="chip">status ${safeText(item.status)}</span>
+            <span class="chip">workspace ${safeText(item.status)}</span>
             <span class="chip">branch ${safeText(item.branch, 'unknown')}</span>
-            <span class="chip">PR ${safeText(item.pr_state, 'unknown')}</span>
-            <span class="chip">checks ${safeText(item.checks_state, 'unknown')}</span>
-            ${item.attention_count ? `<span class="chip ${safeText(item.attention_severity)}">${safeText(item.attention_severity)} attention ${safeText(item.attention_count)}</span>` : ''}
+            ${item.has_uncommitted_changes ? '<span class="chip medium">dirty worktree</span>' : '<span class="chip">clean worktree</span>'}
+            ${(item.current_sessions || []).length ? `<span class="chip medium">sessions ${safeText((item.current_sessions || []).length)}</span>` : ''}
+            ${item.runtime_summary?.preferred_agent ? `<span class="chip">agent ${safeText(item.runtime_summary.preferred_agent)}</span>` : ''}
+            ${item.attention_count ? `<span class="chip ${safeText(item.attention_severity)}">${safeText(item.attention_severity)} alerts ${safeText(item.attention_count)}</span>` : ''}
             ${(item.deployments || []).length ? `<span class="chip">deploy ${safeText((item.deployments || []).map(target => target.provider).join(', '))}</span>` : ''}
+            ${item.pr_state ? `<span class="chip">PR ${safeText(item.pr_state, 'unknown')}</span>` : ''}
+            ${item.checks_state ? `<span class="chip">checks ${safeText(item.checks_state, 'unknown')}</span>` : ''}
           </div>
         </div>
-      `).join('');
+      `).join('')}</div>`;
 
       await loadProjectDetail(selectedProjectId);
     }
@@ -1357,6 +1676,39 @@
           </div>
         `)
         .join('');
+      const sessionRows = (project.sessions || [])
+        .map(session => `
+          <div class="item">
+            <div class="item-header">
+              <div>
+                <strong>${safeText(session.source)}</strong>${session.is_current ? ' - current' : ''}<br>
+                <span class="meta">${safeText(session.summary, 'Session')}</span><br>
+                <span class="meta">activity ${safeText(session.last_activity_at, 'unknown')}</span><br>
+                <span class="meta">cwd ${safeText(session.cwd, 'unknown')}</span><br>
+                <span class="meta">branch ${safeText(session.branch, 'unknown')}</span><br>
+                <span class="meta">status ${safeText(session.status, 'unknown')}</span><br>
+                ${session.session_id ? `<span class="meta">session ${safeText(session.session_id)}</span><br>` : ''}
+                ${session.session_path ? `<span class="meta">${safeText(session.session_path)}</span>` : ''}
+              </div>
+              <div class="actions" style="margin-top:0">
+                ${session.resume_command ? `<button class="btn secondary" onclick="resumeProjectSession(${project.id}, ${session.id})">Resume</button>` : ''}
+                ${session.resume_command ? `<button class="btn secondary" onclick='copyText(${JSON.stringify(String(session.resume_command || ""))})'>Copy Command</button>` : ''}
+                ${session.open_command ? `<button class="btn secondary" onclick='openExternal(${JSON.stringify(String(session.open_command || ""))})'>Open Session File</button>` : ''}
+              </div>
+            </div>
+          </div>
+        `)
+        .join('');
+      const runtime = project.runtime_summary || {};
+      const currentSessionSources = runtime.current_session_sources || [];
+      const recentRunAgents = runtime.recent_run_agents || [];
+      const availableAgents = runtime.available_agents || [];
+      const agentModeChips = [
+        ...availableAgents.map(agent => `<span class="chip">available ${safeText(agent)}</span>`),
+        ...currentSessionSources.map(agent => `<span class="chip medium">current session ${safeText(agent)}</span>`),
+        ...recentRunAgents.map(agent => `<span class="chip">recent run ${safeText(agent)}</span>`),
+        runtime.preferred_agent ? `<span class="chip medium">preferred ${safeText(runtime.preferred_agent)}</span>` : '',
+      ].filter(Boolean).join('');
       const deployments = (project.deployments || [])
         .map(target => `
           <div class="item">
@@ -1428,6 +1780,19 @@
 
       document.getElementById('project-detail').innerHTML = `
         <div class="item">
+          <strong>Agent Mode</strong><br>
+          <div class="meta">${safeText(agentModeLabel(project))}</div>
+          <div class="chips">
+            ${agentModeChips || '<span class="meta">No agent metadata available yet.</span>'}
+          </div>
+          <div class="actions">
+            <button class="btn" onclick="launchProjectCodex(${project.id})">Launch Codex Workspace</button>
+            <button class="btn secondary" onclick="launchProjectOpenClaw(${project.id})">Launch OpenClaw Workspace</button>
+            <button class="btn secondary" onclick="refreshProjectDetail()">Refresh Workspace</button>
+          </div>
+        </div>
+        ${workspaceActionMarkup(project.id)}
+        <div class="item">
           <strong>${safeText(project.display_name)}</strong><br>
           <div class="meta">Owner: ${safeText(project.owner, 'unknown')}</div>
           <div class="meta">Status: ${safeText(project.status)}</div>
@@ -1437,15 +1802,35 @@
         </div>
         ${snapshot}
         <div class="item">
-          <strong>Attention</strong>
-          ${attention || '<p>No active attention items for this project.</p>'}
+          <strong>Workspace Alerts</strong>
+          ${attention || '<p>No active workspace alerts for this project.</p>'}
         </div>
         <div class="item">
           <strong>Aliases</strong>
           <div class="chips">${aliases || '<span class="meta">No aliases yet.</span>'}</div>
         </div>
         <div class="item">
-          <strong>Agent Control</strong>
+          <strong>Runtime And Storage</strong>
+          <div class="meta">Project root: ${safeText(runtime.project_root || project.primary_local_path || 'unknown')}</div>
+          <div class="meta">Stored in Radar DB: ${safeText(runtime.radar_db_path, 'unknown')}</div>
+          <div class="meta">Logs directory: ${safeText(runtime.logs_dir, 'unknown')}</div>
+          <div class="meta">Artifacts directory: ${safeText(runtime.artifacts_dir, 'unknown')}</div>
+          <div class="meta">Codex sessions root: ${safeText(runtime.codex_sessions_root, 'unknown')}</div>
+          <div class="meta">OpenClaw sessions root: ${safeText(runtime.openclaw_sessions_root, 'unknown')}</div>
+          <div class="chips">
+            ${(runtime.available_agents || []).map(agent => `<span class="chip">available ${safeText(agent)}</span>`).join('')}
+            ${(runtime.current_session_sources || []).map(agent => `<span class="chip medium">current session ${safeText(agent)}</span>`).join('')}
+            ${(runtime.recent_run_agents || []).map(agent => `<span class="chip">recent run ${safeText(agent)}</span>`).join('')}
+            ${runtime.preferred_agent ? `<span class="chip medium">preferred ${safeText(runtime.preferred_agent)}</span>` : ''}
+          </div>
+          <div class="meta" style="margin-top:10px">Unified runtime: ${safeText(runtime.unified_runtime, 'unknown')}</div>
+        </div>
+        <div class="item">
+          <strong>Project Sessions</strong>
+          ${sessionRows || '<p>No linked Codex or OpenClaw sessions for this project yet.</p>'}
+        </div>
+        <div class="item">
+          <strong>Task Draft</strong>
           <div class="form-row">
             <div>
               <label for="agent-type">Agent</label>
@@ -1477,15 +1862,18 @@
             <button class="btn" onclick="queueProjectRun(${project.id})">Queue Run</button>
             <button class="btn secondary" onclick="refreshProjectRepo(${project.id})">Refresh Repo</button>
             <button class="btn secondary" onclick="syncProjectGithub(${project.id})">Sync GitHub</button>
-            <button class="btn secondary" onclick="refreshProjectDetail()">Refresh Lane</button>
+            <button class="btn secondary" onclick="refreshProjectDetail()">Refresh Workspace</button>
+            <button class="btn secondary" onclick="deleteProject(${project.id}, '${escapeHtml(project.display_name)}')">Delete Workspace</button>
           </div>
         </div>
         <div class="item">
           <strong>Deployment</strong>
           ${deployments || '<p>No deployment target detected for this project yet.</p>'}
-          <div class="actions">
-            <button class="btn secondary" onclick="deployProject(${project.id})">Deploy Available Target</button>
-          </div>
+          ${(project.deployments || []).some(target => target.runnable)
+            ? `<div class="actions">
+                <button class="btn secondary" onclick="deployProject(${project.id})">Deploy Available Target</button>
+              </div>`
+            : ''}
         </div>
         <div class="item">
           <strong>Discovery Evidence</strong>
@@ -1556,7 +1944,7 @@
     }
 
     function buildDefaultCommand(agentType, skillName, cwd) {
-      const prompt = `use gstack ${skillName} in this project and improve the highest-value next issue`;
+      const prompt = `use gstack ${skillName} in this workspace and improve the highest-value next issue`;
       if (agentType === 'openclaw') {
         return `openclaw --cwd "${cwd}" "${prompt}"`;
       }
@@ -1602,8 +1990,16 @@
       });
       const data = await response.json();
       await loadStatus();
-      await loadProjectDetail(projectId);
-      document.getElementById('status-json').textContent = JSON.stringify(data, null, 2);
+      setWorkspaceActionState(projectId, {
+        title: 'Run queued',
+        summary: response.ok
+          ? `Queued ${agent.value} with ${skill.value} in ${cwd.value}.`
+          : (data.detail || 'Unable to queue the workspace run.'),
+        severity: response.ok ? 'medium' : 'high',
+        details: response.ok
+          ? [`run ${data.run_id || 'pending'}`, `agent ${agent.value}`, `skill ${skill.value}`]
+          : [],
+      });
     }
 
     async function refreshProjectRepo(projectId) {
@@ -1612,8 +2008,12 @@
       });
       const data = await response.json();
       await loadStatus();
-      await loadProjectDetail(projectId);
-      document.getElementById('status-json').textContent = JSON.stringify(data, null, 2);
+      setWorkspaceActionState(projectId, {
+        title: 'Workspace repo refreshed',
+        summary: response.ok ? 'Repo snapshot refreshed for this workspace.' : (data.detail || 'Unable to refresh the workspace repo.'),
+        severity: response.ok ? 'medium' : 'high',
+        details: response.ok ? [`workspace ${projectId}`] : [],
+      });
     }
 
     async function refreshAllRepos() {
@@ -1622,7 +2022,12 @@
       });
       const data = await response.json();
       await loadStatus();
-      document.getElementById('status-json').textContent = JSON.stringify(data, null, 2);
+      setOperatorActionState({
+        title: 'All repos refreshed',
+        summary: response.ok ? 'Radar refreshed repo state across every workspace.' : (data.detail || 'Unable to refresh repo state.'),
+        severity: response.ok ? 'medium' : 'high',
+        details: Object.entries(data || {}).map(([key, value]) => `${key} ${value}`),
+      });
     }
 
     async function syncCodex() {
@@ -1631,7 +2036,12 @@
       });
       const data = await response.json();
       await loadStatus();
-      document.getElementById('status-json').textContent = JSON.stringify(data, null, 2);
+      setOperatorActionState({
+        title: 'Codex sync completed',
+        summary: response.ok ? 'Radar synced Codex session activity.' : (data.detail || 'Unable to sync Codex activity.'),
+        severity: response.ok ? 'medium' : 'high',
+        details: Object.entries(data || {}).map(([key, value]) => `${key} ${value}`),
+      });
     }
 
     async function syncOpenClaw() {
@@ -1640,7 +2050,12 @@
       });
       const data = await response.json();
       await loadStatus();
-      document.getElementById('status-json').textContent = JSON.stringify(data, null, 2);
+      setOperatorActionState({
+        title: 'OpenClaw sync completed',
+        summary: response.ok ? 'Radar synced OpenClaw session activity.' : (data.detail || 'Unable to sync OpenClaw activity.'),
+        severity: response.ok ? 'medium' : 'high',
+        details: Object.entries(data || {}).map(([key, value]) => `${key} ${value}`),
+      });
     }
 
     async function syncGithub() {
@@ -1649,7 +2064,12 @@
       });
       const data = await response.json();
       await loadStatus();
-      document.getElementById('status-json').textContent = JSON.stringify(data, null, 2);
+      setOperatorActionState({
+        title: 'GitHub sync completed',
+        summary: response.ok ? 'Radar refreshed portfolio GitHub metadata.' : (data.detail || 'Unable to sync GitHub metadata.'),
+        severity: response.ok ? 'medium' : 'high',
+        details: Object.entries(data || {}).map(([key, value]) => `${key} ${value}`),
+      });
     }
 
     async function syncDeployments() {
@@ -1662,7 +2082,12 @@
         await loadProjectDetail(selectedProjectId);
       }
       await loadOperationsBoard();
-      document.getElementById('status-json').textContent = JSON.stringify(data, null, 2);
+      setOperatorActionState({
+        title: 'Deployment sync completed',
+        summary: response.ok ? 'Radar refreshed deployment metadata for the portfolio.' : (data.detail || 'Unable to sync deployments.'),
+        severity: response.ok ? 'medium' : 'high',
+        details: Object.entries(data || {}).map(([key, value]) => `${key} ${value}`),
+      });
     }
 
     async function syncProjectGithub(projectId) {
@@ -1671,8 +2096,12 @@
       });
       const data = await response.json();
       await loadStatus();
-      await loadProjectDetail(projectId);
-      document.getElementById('status-json').textContent = JSON.stringify(data, null, 2);
+      setWorkspaceActionState(projectId, {
+        title: 'Workspace GitHub sync completed',
+        summary: response.ok ? 'GitHub metadata refreshed for this workspace.' : (data.detail || 'Unable to sync GitHub for this workspace.'),
+        severity: response.ok ? 'medium' : 'high',
+        details: Object.entries(data || {}).map(([key, value]) => `${key} ${value}`),
+      });
     }
 
     async function deployProject(projectId) {
@@ -1681,8 +2110,12 @@
       });
       const data = await response.json();
       await loadStatus();
-      await loadProjectDetail(projectId);
-      document.getElementById('status-json').textContent = JSON.stringify(data, null, 2);
+      setWorkspaceActionState(projectId, {
+        title: 'Deployment queued',
+        summary: response.ok ? 'Deployment action queued for this workspace.' : (data.detail || 'Unable to queue deployment for this workspace.'),
+        severity: response.ok ? 'medium' : 'high',
+        details: response.ok ? [`run ${data.run_id || 'pending'}`, `provider ${data.provider || 'unknown'}`] : [],
+      });
     }
 
     async function runDeploymentAction(projectId, provider, actionId, deployId = '') {
@@ -1697,7 +2130,12 @@
       if (deploymentHistoryCache[deploymentHistoryKey(projectId, provider)]) {
         await loadDeploymentHistory(projectId, provider, false);
       }
-      document.getElementById('status-json').textContent = JSON.stringify(data, null, 2);
+      setWorkspaceActionState(projectId, {
+        title: `Deployment action: ${actionId}`,
+        summary: response.ok ? `Deployment action ran for ${provider}.` : (data.detail || `Unable to run deployment action for ${provider}.`),
+        severity: response.ok ? 'medium' : 'high',
+        details: Object.entries(data || {}).map(([key, value]) => `${key} ${value}`),
+      });
     }
 
     async function loadDeploymentHistory(projectId, provider, rerender = true) {
@@ -1720,7 +2158,12 @@
       if (selectedProjectId === projectId) {
         await loadProjectDetail(projectId);
       }
-      document.getElementById('status-json').textContent = JSON.stringify(data, null, 2);
+      setWorkspaceActionState(projectId, {
+        title: `Deployment history ${provider}`,
+        summary: response.ok ? `Loaded deployment history for ${provider}.` : (data.detail || `Unable to load deployment history for ${provider}.`),
+        severity: response.ok ? 'medium' : 'high',
+        details: response.ok ? [`entries ${(data.items || []).length}`] : [],
+      });
     }
 
     function openExternal(url) {
@@ -1728,6 +2171,176 @@
         return;
       }
       window.open(url, '_blank', 'noopener,noreferrer');
+    }
+
+    async function copyText(value) {
+      if (!value) {
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(String(value));
+        if (selectedProjectId) {
+          setWorkspaceActionState(selectedProjectId, {
+            title: 'Copied command',
+            summary: 'Copied the workspace command to the clipboard.',
+            severity: 'medium',
+            details: [String(value)],
+          });
+        }
+      } catch (error) {
+        if (selectedProjectId) {
+          setWorkspaceActionState(selectedProjectId, {
+            title: 'Copy failed',
+            summary: String(error),
+            severity: 'high',
+          });
+        }
+      }
+    }
+
+    async function resumeProjectSession(projectId, sessionRecordId) {
+      const response = await fetch(`/api/projects/${projectId}/sessions/${sessionRecordId}/resume`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        setWorkspaceActionState(projectId, {
+          title: 'Resume failed',
+          summary: data.detail || 'Unable to resume the workspace session.',
+          severity: 'high',
+        });
+        alert(data.detail || 'Unable to resume session.');
+        return;
+      }
+      setWorkspaceActionState(projectId, {
+        title: 'Session resumed',
+        summary: 'Resume command dispatched for this workspace session.',
+        severity: 'medium',
+        details: Object.entries(data || {}).map(([key, value]) => `${key} ${value}`),
+      });
+    }
+
+    async function launchProjectCodex(projectId) {
+      const response = await fetch(`/api/projects/${projectId}/launch/codex`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        setWorkspaceActionState(projectId, {
+          title: 'Codex launch failed',
+          summary: data.detail || 'Unable to open Codex for this workspace.',
+          severity: 'high',
+        });
+        alert(data.detail || 'Unable to open Codex for this workspace.');
+        return;
+      }
+      setWorkspaceActionState(projectId, {
+        title: 'Codex opened',
+        summary: 'Codex launch command dispatched for this workspace.',
+        severity: 'medium',
+        details: Object.entries(data || {}).map(([key, value]) => `${key} ${value}`),
+      });
+    }
+
+    async function launchProjectOpenClaw(projectId) {
+      const response = await fetch(`/api/projects/${projectId}/launch/openclaw`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        setWorkspaceActionState(projectId, {
+          title: 'OpenClaw launch failed',
+          summary: data.detail || 'Unable to open OpenClaw for this workspace.',
+          severity: 'high',
+        });
+        alert(data.detail || 'Unable to open OpenClaw for this workspace.');
+        return;
+      }
+      setWorkspaceActionState(projectId, {
+        title: 'OpenClaw opened',
+        summary: 'OpenClaw launch command dispatched for this workspace.',
+        severity: 'medium',
+        details: Object.entries(data || {}).map(([key, value]) => `${key} ${value}`),
+      });
+    }
+
+    async function createProject() {
+      const payload = {
+        display_name: document.getElementById('new-project-name')?.value || '',
+        primary_local_path: document.getElementById('new-project-path')?.value || '',
+        remote_url: document.getElementById('new-project-remote')?.value || '',
+        owner: document.getElementById('new-project-owner')?.value || 'local'
+      };
+      const response = await fetch('/api/projects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        setBoardActionState({
+          title: 'Workspace creation failed',
+          summary: data.detail || 'Unable to create the workspace.',
+          severity: 'high',
+        });
+        alert(data.detail || 'Unable to create project.');
+        return;
+      }
+      document.getElementById('new-project-name').value = '';
+      document.getElementById('new-project-path').value = '';
+      document.getElementById('new-project-remote').value = '';
+      await loadStatus();
+      await loadProjects(data.project_id);
+      setBoardActionState({
+        title: 'Workspace created',
+        summary: `Added ${payload.display_name || payload.primary_local_path || 'new workspace'} to the board.`,
+        severity: 'medium',
+        details: response.ok ? [`workspace ${data.project_id}`] : [],
+      });
+      setWorkspaceActionState(data.project_id, {
+        title: 'Workspace ready',
+        summary: 'This workspace is now active in Radar.',
+        severity: 'medium',
+        details: [`owner ${payload.owner || 'local'}`],
+      });
+    }
+
+    async function deleteProject(projectId, displayName) {
+      if (!confirm(`Delete workspace "${displayName}" from Radar? This removes it from the workspace board but does not delete local files.`)) {
+        return;
+      }
+      const response = await fetch(`/api/projects/${projectId}`, {
+        method: 'DELETE'
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        setWorkspaceActionState(projectId, {
+          title: 'Workspace delete failed',
+          summary: data.detail || 'Unable to delete the workspace.',
+          severity: 'high',
+        });
+        alert(data.detail || 'Unable to delete workspace.');
+        return;
+      }
+      if (workspaceActionState && workspaceActionState.projectId === projectId) {
+        workspaceActionState = null;
+      }
+      await loadStatus();
+      await loadCandidates();
+      await loadProjects();
+      setBoardActionState({
+        title: 'Workspace removed',
+        summary: `Removed ${displayName} from Radar. Local files were left untouched.`,
+        severity: 'medium',
+      });
+    }
+
+    function setProjectFilter(filter) {
+      projectFilter = filter || 'all';
+      loadProjects(selectedProjectId);
     }
 
     async function refreshProjectDetail() {
@@ -1744,11 +2357,14 @@
       });
       const data = await response.json();
       await loadStatus();
-      await loadProjectDetail(projectId);
       if (selectedLogRunId === runId) {
         await viewRunLog(runId);
       }
-      document.getElementById('status-json').textContent = JSON.stringify(data, null, 2);
+      setWorkspaceActionState(projectId, {
+        title: 'Run canceled',
+        summary: response.ok ? `Canceled run ${runId} for this workspace.` : (data.detail || `Unable to cancel run ${runId}.`),
+        severity: response.ok ? 'medium' : 'high',
+      });
     }
 
     async function viewRunLog(runId) {
@@ -1767,11 +2383,14 @@
         selectedLogRunId = null;
         persistSelectedLogRun(null);
       }
-      document.getElementById('status-json').textContent = JSON.stringify({
-        run_id: data.run_id,
-        status: data.status,
-        log_path: data.log_path
-      }, null, 2);
+      if (selectedProjectId) {
+        setWorkspaceActionState(selectedProjectId, {
+          title: 'Run log loaded',
+          summary: response.ok ? `Viewing log for run ${data.run_id || runId}.` : 'Unable to load the selected run log.',
+          severity: response.ok ? 'medium' : 'high',
+          details: data.log_path ? [data.log_path] : [],
+        });
+      }
     }
 
     async function loadSkills() {
@@ -1788,10 +2407,21 @@
       document.getElementById('candidates').textContent = data.candidates;
       document.getElementById('runs').textContent = data.active_runs || data.runs;
       document.getElementById('attention-count').textContent = data.attention_count;
-      document.getElementById('status-json').textContent = JSON.stringify(data, null, 2);
+      if (!operatorActionState) {
+        setOperatorActionState({
+          title: 'Operator status',
+          summary: 'Portfolio-wide status is current.',
+          severity: 'medium',
+          details: [
+            `workspaces ${data.projects}`,
+            `pending discovery ${data.candidates}`,
+            `active runs ${data.active_runs || data.runs}`,
+            `workspace alerts ${data.attention_count}`,
+          ],
+        });
+      }
       renderSyncBanners(data.sync_state || []);
       await loadCandidates();
-      await loadAttention();
       await loadActivity();
       await loadOperationsBoard();
       await loadProjects();
@@ -1805,7 +2435,12 @@
       });
       const data = await response.json();
       await loadStatus();
-      document.getElementById('status-json').textContent = JSON.stringify(data, null, 2);
+      setOperatorActionState({
+        title: 'Discovery completed',
+        summary: response.ok ? 'Radar scanned local roots for new workspaces and session activity.' : (data.detail || 'Unable to run discovery.'),
+        severity: response.ok ? 'medium' : 'high',
+        details: Object.entries(data || {}).map(([key, value]) => `${key} ${value}`),
+      });
     }
 
     async function confirmCandidate(candidateId) {
@@ -1817,16 +2452,66 @@
       const data = await response.json();
       await loadStatus();
       await loadProjects(data.project_id);
-      document.getElementById('status-json').textContent = JSON.stringify(data, null, 2);
+      setBoardActionState({
+        title: 'Candidate confirmed',
+        summary: response.ok ? `Confirmed ${candidateId} into a workspace.` : (data.detail || 'Unable to confirm candidate.'),
+        severity: response.ok ? 'medium' : 'high',
+        details: response.ok ? [`workspace ${data.project_id}`] : [],
+      });
+    }
+
+    async function confirmGitCandidates() {
+      const gitCandidates = latestCandidates.filter(item => String(item.source || '') === 'git_scan');
+      if (!gitCandidates.length) {
+        setBoardActionState({
+          title: 'No git repo candidates',
+          summary: 'There are no pending git repo candidates to confirm.',
+          severity: 'medium',
+        });
+        return;
+      }
+
+      const confirmed = [];
+      const skipped = [];
+      for (const candidate of gitCandidates) {
+        const response = await fetch('/api/discovery/confirm', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ candidate_id: candidate.id, owner: 'local' })
+        });
+        const data = await response.json();
+        if (response.ok) {
+          confirmed.push({ id: candidate.id, display_name: candidate.display_name, project_id: data.project_id, status: data.status });
+        } else {
+          skipped.push({ id: candidate.id, display_name: candidate.display_name, error: data.detail || data.error || 'unknown error' });
+        }
+      }
+
+      await loadStatus();
+      await loadProjects();
+      setBoardActionState({
+        title: 'Git repo confirmation completed',
+        summary: skipped.length
+          ? `Confirmed ${confirmed.length} candidates with ${skipped.length} skips.`
+          : `Confirmed ${confirmed.length} git repo candidates.`,
+        severity: skipped.length ? 'high' : 'medium',
+        details: [
+          `confirmed ${confirmed.length}`,
+          `skipped ${skipped.length}`,
+        ],
+      });
     }
 
     document.getElementById('load-status').addEventListener('click', loadStatus);
     document.getElementById('run-discovery').addEventListener('click', runDiscovery);
+    document.getElementById('confirm-git-candidates').addEventListener('click', confirmGitCandidates);
+    document.getElementById('create-project').addEventListener('click', createProject);
     document.getElementById('refresh-repos').addEventListener('click', refreshAllRepos);
     document.getElementById('sync-codex').addEventListener('click', syncCodex);
     document.getElementById('sync-openclaw').addEventListener('click', syncOpenClaw);
     document.getElementById('sync-github').addEventListener('click', syncGithub);
     document.getElementById('sync-deployments').addEventListener('click', syncDeployments);
+    document.getElementById('project-search').addEventListener('input', () => loadProjects(selectedProjectId));
     document.getElementById('operations-view').addEventListener('change', () => {
       syncOperationsFilterOptions();
       const view = document.getElementById('operations-view')?.value || 'runs';

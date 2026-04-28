@@ -84,6 +84,8 @@ class ProjectService:
             item["attention"] = attention
             item["attention_count"] = len(attention)
             item["attention_severity"] = self._highest_attention_severity(attention)
+            item["current_sessions"] = self._load_project_sessions(int(item["id"]), current_only=True, limit=4)
+            item["runtime_summary"] = self._build_runtime_summary(item)
             item["deployments"] = self._enrich_deployments(
                 project=item,
                 deployments=self._merge_deployments(
@@ -172,6 +174,9 @@ class ProjectService:
         project["related_candidates"] = [dict(candidate) for candidate in related_candidates]
         project["recent_runs"] = [dict(run) for run in recent_runs]
         project["recent_events"] = [dict(event) for event in recent_events]
+        project["sessions"] = self._load_project_sessions(project_id, limit=20)
+        project["current_sessions"] = [item for item in project["sessions"] if item.get("is_current")]
+        project["runtime_summary"] = self._build_runtime_summary(project)
         project["deployments"] = self._enrich_deployments(
             project=project,
             deployments=self._merge_deployments(
@@ -182,6 +187,108 @@ class ProjectService:
         project["attention"] = self._derive_attention(project, project["recent_runs"])
         project["attention_severity"] = self._highest_attention_severity(project["attention"])
         return project
+
+    def create_project(
+        self,
+        *,
+        display_name: str,
+        primary_local_path: str,
+        remote_url: str = "",
+        default_branch: str = "",
+        owner: str = "local",
+    ) -> dict:
+        normalized_path = str(Path(primary_local_path).expanduser().resolve()) if primary_local_path.strip() else ""
+        if not normalized_path:
+            raise ValueError("primary_local_path is required")
+
+        path = Path(normalized_path)
+        if not path.exists():
+            raise ValueError("primary_local_path does not exist")
+
+        repo_root = self._find_git_root(path) or (path if path.is_dir() else path.parent)
+        normalized_repo_path = str(repo_root.resolve()) if repo_root.exists() else normalized_path
+        inferred_remote = self._git_value(repo_root, "remote", "get-url", "origin") if (repo_root / ".git").exists() else ""
+        inferred_branch = self._git_value(repo_root, "symbolic-ref", "--short", "HEAD") if (repo_root / ".git").exists() else ""
+        final_remote = remote_url.strip() or inferred_remote
+        final_branch = default_branch.strip() or inferred_branch
+        final_name = display_name.strip() or repo_root.name or path.name
+
+        with self.db.connect() as conn:
+            existing = self._find_existing_project(conn, normalized_repo_path, final_remote or None)
+            if existing is not None:
+                raise ValueError("A project with this path or remote already exists")
+
+            now = utc_now_iso()
+            cursor = conn.execute(
+                """
+                INSERT INTO projects
+                (display_name, primary_local_path, remote_url, default_branch, owner, status, source_confidence, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, 'confirmed', ?, ?, ?)
+                """,
+                (
+                    final_name,
+                    normalized_repo_path,
+                    final_remote or None,
+                    final_branch or None,
+                    owner.strip() or "local",
+                    1.0,
+                    now,
+                    now,
+                ),
+            )
+            project_id = int(cursor.lastrowid)
+            self._upsert_alias(conn, project_id, "repo_path", normalized_repo_path, 1.0)
+            self._upsert_alias(conn, project_id, "cwd", normalized_path, 0.95)
+            if final_remote:
+                self._upsert_alias(conn, project_id, "remote_url", final_remote, 1.0)
+            self._upsert_alias(conn, project_id, "candidate_type", "manual", 1.0)
+            self._refresh_project_metadata(conn, project_id)
+            conn.commit()
+        return {"project_id": project_id, "status": "created"}
+
+    def delete_project(self, project_id: int) -> dict:
+        with self.db.connect() as conn:
+            project = conn.execute(
+                """
+                SELECT id, primary_local_path, remote_url
+                FROM projects
+                WHERE id = ?
+                """,
+                (project_id,),
+            ).fetchone()
+            if project is None:
+                raise ValueError("Project not found")
+
+            path_value = str(project["primary_local_path"] or "").strip()
+            remote_value = str(project["remote_url"] or "").strip()
+            conn.execute(
+                """
+                UPDATE discovery_candidates
+                SET review_status = 'pending'
+                WHERE review_status IN ('confirmed', 'merged')
+                  AND (
+                    (? != '' AND COALESCE(json_extract(evidence_json, '$.repo_path'), '') = ?)
+                    OR (? != '' AND COALESCE(json_extract(evidence_json, '$.cwd'), '') = ?)
+                    OR (? != '' AND COALESCE(json_extract(evidence_json, '$.remote_url'), '') = ?)
+                  )
+                """,
+                (path_value, path_value, path_value, path_value, remote_value, remote_value),
+            )
+            for table in (
+                "project_aliases",
+                "agent_events",
+                "project_sessions",
+                "repo_snapshots",
+                "pull_request_snapshots",
+                "deploy_snapshots",
+                "release_snapshots",
+                "alerts",
+                "agent_runs",
+            ):
+                conn.execute(f"DELETE FROM {table} WHERE project_id = ?", (project_id,))
+            conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+            conn.commit()
+        return {"project_id": project_id, "status": "deleted"}
 
     def list_attention_queue(self) -> list[dict]:
         queue = []
@@ -474,6 +581,59 @@ class ProjectService:
             glob_pattern="*.jsonl*",
         )
 
+    def resume_project_session(self, project_id: int, session_record_id: int) -> dict:
+        with self.db.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT id, project_id, source, session_id, session_path, cwd, resume_command
+                FROM project_sessions
+                WHERE id = ? AND project_id = ?
+                """,
+                (session_record_id, project_id),
+            ).fetchone()
+        if row is None:
+            raise ValueError("Project session not found")
+        if str(row["source"]) != "codex":
+            raise ValueError("Only Codex sessions currently support resume from the dashboard")
+        resume_command = str(row["resume_command"] or "").strip()
+        if not resume_command:
+            raise ValueError("No resume command is available for this session")
+        self._launch_resume_terminal(resume_command, str(row["cwd"] or ""))
+        return {
+            "status": "launched",
+            "project_id": project_id,
+            "session_record_id": session_record_id,
+            "session_id": row["session_id"],
+            "command": resume_command,
+        }
+
+    def launch_project_codex(self, project_id: int) -> dict:
+        return self._launch_project_agent(project_id, "codex")
+
+    def launch_project_openclaw(self, project_id: int) -> dict:
+        return self._launch_project_agent(project_id, "openclaw")
+
+    def _launch_project_agent(self, project_id: int, agent_type: str) -> dict:
+        project = self.get_project(project_id)
+        if project is None:
+            raise ValueError("Project not found")
+        cwd = str(project.get("primary_local_path") or "").strip()
+        if not cwd:
+            raise ValueError("Project has no local path")
+        if not shutil.which(agent_type):
+            raise ValueError(f"{agent_type} is not available on PATH")
+        if agent_type == "openclaw":
+            command = f"openclaw --cwd {self._powershell_quote(cwd)}"
+        else:
+            command = f"codex -C {self._powershell_quote(cwd)}"
+        self._launch_resume_terminal(command, cwd)
+        return {
+            "status": "launched",
+            "project_id": project_id,
+            "agent_type": agent_type,
+            "command": command,
+        }
+
     def sync_github_pull_requests(self, project_id: int | None = None) -> dict:
         project_ids = [project_id] if project_id is not None else [item["id"] for item in self.list_projects()]
         synced = 0
@@ -615,7 +775,6 @@ class ProjectService:
         *,
         merged: bool = False,
     ) -> None:
-        alias_rows = []
         for alias_type, alias_value in (
             ("candidate_type", candidate["candidate_type"]),
             ("repo_path", evidence.get("repo_path")),
@@ -624,22 +783,7 @@ class ProjectService:
             ("session_file", evidence.get("session_file")),
         ):
             if alias_value:
-                alias_rows.append((project_id, alias_type, str(alias_value), float(candidate["confidence"])))
-
-        conn.executemany(
-            """
-            INSERT INTO project_aliases (project_id, alias_type, alias_value, confidence)
-            SELECT ?, ?, ?, ?
-            WHERE NOT EXISTS (
-                SELECT 1 FROM project_aliases
-                WHERE project_id = ? AND alias_type = ? AND alias_value = ?
-            )
-            """,
-            [
-                (project_id, alias_type, alias_value, confidence, project_id, alias_type, alias_value)
-                for project_id, alias_type, alias_value, confidence in alias_rows
-            ],
-        )
+                self._upsert_alias(conn, project_id, alias_type, str(alias_value), float(candidate["confidence"]))
         conn.execute(
             """
             UPDATE discovery_candidates
@@ -648,6 +792,50 @@ class ProjectService:
             """,
             ("merged" if merged else "confirmed", candidate["id"]),
         )
+
+    def _upsert_alias(self, conn, project_id: int, alias_type: str, alias_value: str, confidence: float) -> None:
+        conn.execute(
+            """
+            INSERT INTO project_aliases (project_id, alias_type, alias_value, confidence)
+            SELECT ?, ?, ?, ?
+            WHERE NOT EXISTS (
+                SELECT 1 FROM project_aliases
+                WHERE project_id = ? AND alias_type = ? AND alias_value = ?
+            )
+            """,
+            (project_id, alias_type, alias_value, confidence, project_id, alias_type, alias_value),
+        )
+
+    def _build_runtime_summary(self, project: dict) -> dict:
+        current_sessions = project.get("current_sessions") or []
+        recent_runs = project.get("recent_runs") or []
+        current_sources = sorted({str(item.get("source") or "") for item in current_sessions if item.get("source")})
+        recent_agents = sorted(
+            {
+                str(item.get("agent_type") or "")
+                for item in recent_runs
+                if str(item.get("agent_type") or "") in {"codex", "openclaw", "deploy"}
+            }
+        )
+        available_agents = [agent for agent in ("codex", "openclaw") if shutil.which(agent)]
+        preferred_agent = (
+            current_sources[0]
+            if current_sources
+            else (recent_agents[0] if recent_agents else (available_agents[0] if available_agents else ""))
+        )
+        return {
+            "project_root": str(project.get("primary_local_path") or ""),
+            "radar_db_path": str(self.settings.db_path),
+            "logs_dir": str(self.settings.logs_dir),
+            "artifacts_dir": str(self.settings.artifacts_dir),
+            "codex_sessions_root": str(self.settings.codex_sessions_root),
+            "openclaw_sessions_root": str(self.settings.openclaw_sessions_root),
+            "available_agents": available_agents,
+            "current_session_sources": current_sources,
+            "recent_run_agents": recent_agents,
+            "preferred_agent": preferred_agent,
+            "unified_runtime": "shared project record, skill catalog, run queue, logs, and artifacts",
+        }
 
     def _refresh_project_metadata(self, conn, project_id: int) -> bool:
         project = conn.execute(
@@ -1840,6 +2028,7 @@ class ProjectService:
             return {"status": "skipped", "reason": f"Missing sessions root: {sessions_root}", "inserted": 0}
 
         inserted = 0
+        attached = 0
         files = sorted(sessions_root.rglob(glob_pattern), key=lambda path: path.stat().st_mtime, reverse=True)[:300]
         with self.db.connect() as conn:
             projects = conn.execute(
@@ -1870,6 +2059,30 @@ class ProjectService:
                     continue
 
                 raw_ref = str(session_file)
+                occurred_at = datetime.fromtimestamp(session_file.stat().st_mtime, tz=timezone.utc).isoformat()
+                session_id = self._extract_session_id(source, session_data)
+                repo_value = str(repo_path.resolve()) if repo_path else str(Path(cwd).resolve())
+                branch = self._read_git_branch(repo_path) if repo_path else ""
+                status = self._session_status(source, session_file)
+                summary = self._session_summary(source, cwd, status)
+                resume_command = self._build_session_resume_command(source=source, session_id=session_id, cwd=cwd)
+                self._upsert_project_session(
+                    conn,
+                    project_id=matched_project_id,
+                    source=source,
+                    session_id=session_id,
+                    session_path=raw_ref,
+                    cwd=str(Path(cwd).resolve()),
+                    repo_path=repo_value,
+                    branch=branch,
+                    status=status,
+                    last_activity_at=occurred_at,
+                    summary=summary,
+                    resume_command=resume_command,
+                    open_command=raw_ref,
+                )
+                attached += 1
+
                 exists = conn.execute(
                     """
                     SELECT 1
@@ -1878,24 +2091,211 @@ class ProjectService:
                     """,
                     (matched_project_id, source, raw_ref),
                 ).fetchone()
-                if exists is not None:
-                    continue
-
-                occurred_at = datetime.fromtimestamp(session_file.stat().st_mtime, tz=timezone.utc).isoformat()
-                session_id = self._extract_session_id(source, session_data)
-                summary = f"{source} session seen in {repo_path or cwd}"
-                conn.execute(
-                    """
-                    INSERT INTO agent_events
-                    (project_id, source, event_type, occurred_at, session_id, summary, raw_ref)
-                    VALUES (?, ?, 'session_seen', ?, ?, ?, ?)
-                    """,
-                    (matched_project_id, source, occurred_at, session_id, summary, raw_ref),
-                )
-                inserted += 1
+                if exists is None:
+                    conn.execute(
+                        """
+                        INSERT INTO agent_events
+                        (project_id, source, event_type, occurred_at, session_id, summary, raw_ref)
+                        VALUES (?, ?, 'session_seen', ?, ?, ?, ?)
+                        """,
+                        (matched_project_id, source, occurred_at, session_id, summary, raw_ref),
+                    )
+                    inserted += 1
+            project_ids = {int(row["project_id"]) for row in conn.execute("SELECT DISTINCT project_id FROM project_sessions").fetchall()}
+            for project_id in project_ids:
+                self._refresh_current_sessions(conn, project_id)
             conn.commit()
         self._mark_sync_state(source, success=True, error_summary=None)
-        return {"status": "completed", "inserted": inserted}
+        return {"status": "completed", "inserted": inserted, "sessions": attached}
+
+    def _load_project_sessions(self, project_id: int, *, current_only: bool = False, limit: int = 20) -> list[dict]:
+        query = """
+            SELECT id, project_id, source, session_id, session_path, cwd, repo_path, branch, status,
+                   last_activity_at, summary, resume_command, open_command, is_current, created_at, updated_at
+            FROM project_sessions
+            WHERE project_id = ?
+        """
+        params: list[Any] = [project_id]
+        if current_only:
+            query += " AND is_current = 1"
+        query += " ORDER BY last_activity_at DESC, id DESC LIMIT ?"
+        params.append(limit)
+        with self.db.connect() as conn:
+            rows = conn.execute(query, tuple(params)).fetchall()
+        items = [dict(row) for row in rows]
+        for item in items:
+            item["is_current"] = bool(item.get("is_current"))
+        return items
+
+    def _upsert_project_session(
+        self,
+        conn,
+        *,
+        project_id: int,
+        source: str,
+        session_id: str | None,
+        session_path: str,
+        cwd: str,
+        repo_path: str,
+        branch: str,
+        status: str,
+        last_activity_at: str,
+        summary: str,
+        resume_command: str,
+        open_command: str,
+    ) -> None:
+        existing = conn.execute(
+            """
+            SELECT id
+            FROM project_sessions
+            WHERE source = ? AND session_path = ?
+            """,
+            (source, session_path),
+        ).fetchone()
+        if existing is None:
+            conn.execute(
+                """
+                INSERT INTO project_sessions
+                (project_id, source, session_id, session_path, cwd, repo_path, branch, status,
+                 last_activity_at, summary, resume_command, open_command, is_current, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+                """,
+                (
+                    project_id,
+                    source,
+                    session_id,
+                    session_path,
+                    cwd,
+                    repo_path,
+                    branch,
+                    status,
+                    last_activity_at,
+                    summary,
+                    resume_command,
+                    open_command,
+                    utc_now_iso(),
+                    utc_now_iso(),
+                ),
+            )
+            return
+        conn.execute(
+            """
+            UPDATE project_sessions
+            SET project_id = ?,
+                session_id = ?,
+                cwd = ?,
+                repo_path = ?,
+                branch = ?,
+                status = ?,
+                last_activity_at = ?,
+                summary = ?,
+                resume_command = ?,
+                open_command = ?,
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (
+                project_id,
+                session_id,
+                cwd,
+                repo_path,
+                branch,
+                status,
+                last_activity_at,
+                summary,
+                resume_command,
+                open_command,
+                utc_now_iso(),
+                int(existing["id"]),
+            ),
+        )
+
+    def _refresh_current_sessions(self, conn, project_id: int) -> None:
+        sources = conn.execute(
+            """
+            SELECT DISTINCT source
+            FROM project_sessions
+            WHERE project_id = ?
+            """,
+            (project_id,),
+        ).fetchall()
+        for source_row in sources:
+            source = str(source_row["source"] or "")
+            conn.execute(
+                """
+                UPDATE project_sessions
+                SET is_current = 0
+                WHERE project_id = ? AND source = ?
+                """,
+                (project_id, source),
+            )
+            latest = conn.execute(
+                """
+                SELECT id
+                FROM project_sessions
+                WHERE project_id = ? AND source = ?
+                ORDER BY last_activity_at DESC, id DESC
+                LIMIT 1
+                """,
+                (project_id, source),
+            ).fetchone()
+            if latest is not None:
+                conn.execute(
+                    """
+                    UPDATE project_sessions
+                    SET is_current = 1
+                    WHERE id = ?
+                    """,
+                    (int(latest["id"]),),
+                )
+
+    def _session_status(self, source: str, session_file: Path) -> str:
+        if source == "openclaw" and ".deleted." in session_file.name:
+            return "archived"
+        return "current"
+
+    def _session_summary(self, source: str, cwd: str, status: str) -> str:
+        label = source.capitalize()
+        return f"{label} {status} session in {cwd}"
+
+    def _read_git_branch(self, repo_path: Path | None) -> str:
+        if repo_path is None:
+            return ""
+        try:
+            result = subprocess.run(
+                ["git", "-C", str(repo_path), "branch", "--show-current"],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=5,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return ""
+        if result.returncode != 0:
+            return ""
+        return result.stdout.strip()
+
+    def _build_session_resume_command(self, *, source: str, session_id: str | None, cwd: str) -> str:
+        if source != "codex" or not session_id or not cwd:
+            return ""
+        return f"codex resume {self._powershell_quote(session_id)} -C {self._powershell_quote(cwd)}"
+
+    def _launch_resume_terminal(self, command: str, cwd: str) -> None:
+        normalized_cwd = str(Path(cwd).resolve()) if cwd else ""
+        if not normalized_cwd:
+            raise ValueError("No working directory is available for this session")
+        script = f"Set-Location -LiteralPath {self._powershell_quote(normalized_cwd)}; {command}"
+        creationflags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
+        try:
+            subprocess.Popen(
+                ["powershell.exe", "-NoExit", "-Command", script],
+                creationflags=creationflags,
+            )
+        except OSError as exc:
+            raise ValueError(f"Failed to launch Codex resume session: {exc}") from exc
+
+    def _powershell_quote(self, value: str) -> str:
+        return "'" + value.replace("'", "''") + "'"
 
     def _recent_runs_for_project(self, project_id: int, *, limit: int) -> list[dict]:
         with self.db.connect() as conn:
@@ -2057,6 +2457,17 @@ class ProjectService:
             matched = project_map.get(str(current))
             if matched is not None:
                 return matched
+            if current.parent == current:
+                return None
+            current = current.parent
+
+    def _find_git_root(self, path: Path) -> Path | None:
+        current = path
+        if current.is_file():
+            current = current.parent
+        while True:
+            if (current / ".git").exists():
+                return current
             if current.parent == current:
                 return None
             current = current.parent

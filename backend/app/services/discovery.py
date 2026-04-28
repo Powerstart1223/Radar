@@ -121,6 +121,8 @@ class DiscoveryService:
             if not cwd:
                 continue
             repo_root = self._find_git_root(Path(cwd))
+            if not self._should_surface_session_candidate(cwd, repo_root):
+                continue
             display_name = repo_root.name if repo_root else Path(cwd).name or cwd
             evidence = {
                 "cwd": cwd,
@@ -156,6 +158,8 @@ class DiscoveryService:
             if not cwd:
                 continue
             repo_root = self._find_git_root(Path(cwd))
+            if not self._should_surface_session_candidate(cwd, repo_root):
+                continue
             display_name = repo_root.name if repo_root else Path(cwd).name or cwd
             evidence = {
                 "cwd": cwd,
@@ -199,6 +203,17 @@ class DiscoveryService:
             if current.parent == current:
                 return None
             current = current.parent
+
+    def _should_surface_session_candidate(self, cwd: str, repo_root: Path | None) -> bool:
+        if repo_root is None:
+            return False
+        normalized = str(Path(cwd).resolve()).lower()
+        ignored_prefixes = (
+            str((Path.home() / ".codex").resolve()).lower(),
+            str((Path.home() / ".openclaw").resolve()).lower(),
+            str(Path("C:/Windows").resolve()).lower(),
+        )
+        return not any(normalized.startswith(prefix) for prefix in ignored_prefixes)
 
     def _git_value(self, cwd: Path, *args: str) -> str:
         result = subprocess.run(

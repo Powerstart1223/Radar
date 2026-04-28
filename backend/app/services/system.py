@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from app.db.database import Database
 from app.services.projects import ProjectService
 
@@ -17,7 +19,25 @@ class SystemService:
                 "SELECT source, last_success_at, last_error_at, last_error_summary FROM sync_state ORDER BY source"
             ).fetchall()
             project_count = conn.execute("SELECT COUNT(*) AS count FROM projects").fetchone()["count"]
-            candidate_count = conn.execute("SELECT COUNT(*) AS count FROM discovery_candidates").fetchone()["count"]
+            candidate_count = conn.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM discovery_candidates
+                WHERE review_status = 'pending'
+                  AND (
+                    source = 'git_scan'
+                    OR (
+                      COALESCE(json_extract(evidence_json, '$.repo_path'), '') != ''
+                      AND LOWER(COALESCE(json_extract(evidence_json, '$.repo_path'), '')) NOT LIKE ?
+                      AND LOWER(COALESCE(json_extract(evidence_json, '$.repo_path'), '')) NOT LIKE ?
+                    )
+                  )
+                """,
+                (
+                    f"{str((Path.home() / '.codex').resolve()).lower()}%",
+                    f"{str((Path.home() / '.openclaw').resolve()).lower()}%",
+                ),
+            ).fetchone()["count"]
             run_count = conn.execute("SELECT COUNT(*) AS count FROM agent_runs").fetchone()["count"]
             active_run_count = conn.execute(
                 "SELECT COUNT(*) AS count FROM agent_runs WHERE status IN ('queued', 'running', 'cancelling')"

@@ -53,6 +53,28 @@ SCHEMA_STATEMENTS = (
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS project_sessions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id INTEGER NOT NULL,
+        source TEXT NOT NULL,
+        session_id TEXT,
+        session_path TEXT NOT NULL,
+        cwd TEXT,
+        repo_path TEXT,
+        branch TEXT,
+        status TEXT NOT NULL DEFAULT 'unknown',
+        last_activity_at TEXT NOT NULL,
+        summary TEXT,
+        resume_command TEXT,
+        open_command TEXT,
+        is_current INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(source, session_path),
+        FOREIGN KEY(project_id) REFERENCES projects(id)
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS repo_snapshots (
         project_id INTEGER PRIMARY KEY,
         branch TEXT,
