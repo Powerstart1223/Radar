@@ -39,10 +39,17 @@ class Database:
 
     def seed_skill_definitions(self) -> None:
         skills = (
+            ("canary", "gstack", "Post-deploy health verification", 1, 1, 0),
+            ("document-release", "gstack", "Post-ship documentation update", 1, 1, 0),
+            ("investigate", "gstack", "Root-cause debugging workflow", 1, 1, 0),
+            ("plan-ceo-review", "gstack", "Product scope and strategy review", 1, 1, 0),
+            ("plan-design-review", "gstack", "Design critique for plans", 1, 1, 0),
             ("plan-eng-review", "gstack", "Architecture and implementation review", 1, 1, 0),
             ("office-hours", "gstack", "Product and design thinking session", 1, 1, 0),
+            ("qa-only", "gstack", "Report-only QA workflow", 1, 1, 0),
             ("review", "gstack", "Code review or diff review", 1, 1, 0),
             ("qa", "gstack", "QA and bug-finding workflow", 1, 1, 0),
+            ("ship", "gstack", "Ship workflow for ready changes", 1, 1, 0),
         )
         with self.connect() as conn:
             conn.executemany(

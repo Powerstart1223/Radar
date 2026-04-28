@@ -200,6 +200,13 @@ def build_router(
     def list_skills() -> dict:
         return {"items": runs.list_skills()}
 
+    @router.get("/api/projects/{project_id}/skills/recommended")
+    def get_recommended_skills(project_id: int) -> dict:
+        try:
+            return projects.get_project_skill_recommendations(project_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     @router.post("/api/runs")
     def create_run(payload: dict) -> dict:
         required = {"project_id", "agent_type", "skill_name", "cwd"}

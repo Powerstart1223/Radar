@@ -1041,5 +1041,155 @@ class ProjectServiceSessionTests(unittest.TestCase):
         self.assertEqual(row["review_status"], "pending")
 
 
+class ProjectServiceRecommendationTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.base_dir = Path(self.temp_dir.name)
+        self.db = Database(self.base_dir / "project_radar.db")
+        self.db.init()
+        self.settings = Settings(
+            app_name="Project Radar",
+            app_host="127.0.0.1",
+            app_port=8787,
+            base_dir=self.base_dir,
+            storage_dir=self.base_dir / "storage",
+            artifacts_dir=self.base_dir / "storage" / "artifacts",
+            logs_dir=self.base_dir / "storage" / "logs",
+            db_path=self.base_dir / "project_radar.db",
+            codex_sessions_root=self.base_dir / "codex",
+            openclaw_sessions_root=self.base_dir / "openclaw",
+            github_token="",
+            vercel_token="",
+            netlify_token="",
+            render_token="",
+        )
+        self.service = ProjectService(self.db, self.settings)
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def test_recommendations_prioritize_failed_deployments(self) -> None:
+        repo = self.base_dir / "project-radar"
+        repo.mkdir()
+        now = "2026-04-26T00:00:00+00:00"
+        with self.db.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO projects
+                (id, display_name, primary_local_path, remote_url, default_branch, owner, status, source_confidence, created_at, updated_at)
+                VALUES (1, 'project-radar', ?, '', 'main', 'local', 'confirmed', 1.0, ?, ?)
+                """,
+                (str(repo), now, now),
+            )
+            conn.execute(
+                """
+                INSERT INTO deploy_snapshots
+                (project_id, provider, environment, state, updated_at, url)
+                VALUES (1, 'render', 'production', 'failed', ?, 'https://radar-api.onrender.com')
+                """,
+                (now,),
+            )
+            conn.commit()
+
+        with patch.object(self.service, "_detect_deploy_targets", return_value=[]):
+            result = self.service.get_project_skill_recommendations(1)
+
+        self.assertEqual(result["workspace_state"], "deploy-failed")
+        self.assertEqual(result["next_action"]["skill_name"], "investigate")
+        self.assertEqual(result["suggested"][0]["skill_name"], "investigate")
+
+    def test_recommendations_prioritize_review_for_dirty_workspace_with_recent_agent_work(self) -> None:
+        repo = self.base_dir / "project-radar"
+        repo.mkdir()
+        now = "2026-04-26T00:00:00+00:00"
+        with self.db.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO projects
+                (id, display_name, primary_local_path, remote_url, default_branch, owner, status, source_confidence, created_at, updated_at)
+                VALUES (1, 'project-radar', ?, '', 'main', 'local', 'confirmed', 1.0, ?, ?)
+                """,
+                (str(repo), now, now),
+            )
+            conn.execute(
+                """
+                INSERT INTO repo_snapshots
+                (project_id, branch, has_uncommitted_changes, last_commit_at, remote_name, synced_at)
+                VALUES (1, 'main', 1, ?, 'origin', ?)
+                """,
+                (now, now),
+            )
+            conn.execute(
+                """
+                INSERT INTO agent_runs
+                (project_id, agent_type, skill_name, cwd, command, status, started_at, finished_at, output_summary, artifact_dir, log_path)
+                VALUES (1, 'codex', 'review', ?, 'codex ...', 'finished', ?, ?, 'completed', 'artifacts', 'log.txt')
+                """,
+                (str(repo), now, now),
+            )
+            conn.commit()
+
+        with patch.object(self.service, "_detect_deploy_targets", return_value=[]):
+            result = self.service.get_project_skill_recommendations(1)
+
+        self.assertEqual(result["workspace_state"], "dirty-worktree")
+        self.assertEqual(result["next_action"]["skill_name"], "review")
+        suggested_names = [item["skill_name"] for item in result["suggested"]]
+        self.assertIn("review", suggested_names)
+        self.assertIn("ship", suggested_names)
+
+    def test_recommendations_include_common_workspace_actions(self) -> None:
+        repo = self.base_dir / "project-radar"
+        repo.mkdir()
+        now = "2026-04-26T00:00:00+00:00"
+        with self.db.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO projects
+                (id, display_name, primary_local_path, remote_url, default_branch, owner, status, source_confidence, created_at, updated_at)
+                VALUES (1, 'project-radar', ?, '', 'main', 'local', 'confirmed', 1.0, ?, ?)
+                """,
+                (str(repo), now, now),
+            )
+            conn.commit()
+
+        with patch.object(self.service, "_detect_deploy_targets", return_value=[]):
+            result = self.service.get_project_skill_recommendations(1)
+
+        common_names = [item["skill_name"] for item in result["common"]]
+        self.assertIn("review", common_names)
+        self.assertIn("qa", common_names)
+        self.assertIn("ship", common_names)
+
+    def test_list_projects_includes_workspace_state_and_next_action(self) -> None:
+        repo = self.base_dir / "project-radar"
+        repo.mkdir()
+        now = "2026-04-26T00:00:00+00:00"
+        with self.db.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO projects
+                (id, display_name, primary_local_path, remote_url, default_branch, owner, status, source_confidence, created_at, updated_at)
+                VALUES (1, 'project-radar', ?, '', 'main', 'local', 'confirmed', 1.0, ?, ?)
+                """,
+                (str(repo), now, now),
+            )
+            conn.execute(
+                """
+                INSERT INTO deploy_snapshots
+                (project_id, provider, environment, state, updated_at, url)
+                VALUES (1, 'render', 'production', 'failed', ?, 'https://radar-api.onrender.com')
+                """,
+                (now,),
+            )
+            conn.commit()
+
+        with patch.object(self.service, "_detect_deploy_targets", return_value=[]):
+            items = self.service.list_projects()
+
+        self.assertEqual(items[0]["workspace_state"], "deploy-failed")
+        self.assertEqual(items[0]["next_action"]["skill_name"], "investigate")
+
+
 if __name__ == "__main__":
     unittest.main()

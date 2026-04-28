@@ -188,10 +188,26 @@ class RunService:
         raise ValueError(f"Unsupported agent type: {agent_type}")
 
     def _agent_command_args(self, agent_type: str, skill_name: str, cwd: str) -> list[str]:
-        prompt = f"use gstack {skill_name} in this project and improve the highest-value next issue"
+        prompt = self._skill_prompt(skill_name)
         if agent_type == "openclaw":
             return ["openclaw", "--cwd", cwd, prompt]
         return ["codex", "--cwd", cwd, prompt]
+
+    def _skill_prompt(self, skill_name: str) -> str:
+        prompts = {
+            "canary": "use gstack canary in this workspace and verify the deployed app health",
+            "document-release": "use gstack document-release in this workspace and update the docs to match what just shipped",
+            "investigate": "use gstack investigate in this workspace and root-cause the highest-severity current problem",
+            "office-hours": "use gstack office-hours in this workspace and rethink the highest-value product direction",
+            "plan-ceo-review": "use gstack plan-ceo-review in this workspace and sharpen the product scope and ambition",
+            "plan-design-review": "use gstack plan-design-review in this workspace and critique the user experience direction",
+            "plan-eng-review": "use gstack plan-eng-review in this workspace and lock in the engineering plan",
+            "qa": "use gstack qa in this workspace and find and fix the highest-value defects",
+            "qa-only": "use gstack qa-only in this workspace and report the highest-value defects without changing code",
+            "review": "use gstack review in this workspace and review the current diff for bugs and regressions",
+            "ship": "use gstack ship in this workspace and ship the current ready changes",
+        }
+        return prompts.get(skill_name, f"use gstack {skill_name} in this workspace and improve the highest-value next issue")
 
     def _deploy_command_args(self, skill_name: str) -> list[str]:
         if not skill_name.startswith("deploy:"):

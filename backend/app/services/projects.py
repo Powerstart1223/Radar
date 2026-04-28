@@ -65,6 +65,7 @@ class ProjectService:
         self._release_sync_stop = threading.Event()
 
     def list_projects(self) -> list[dict]:
+        skills = self._load_skill_definitions()
         with self.db.connect() as conn:
             rows = conn.execute(
                 """
@@ -93,6 +94,9 @@ class ProjectService:
                 detected_targets=self._detect_deploy_targets(item.get("primary_local_path")),
                 ),
             )
+            recommendation_state = self._build_workspace_skill_recommendations(item, skills)
+            item["workspace_state"] = recommendation_state["workspace_state"]
+            item["next_action"] = recommendation_state["next_action"]
         return items
 
     def get_project(self, project_id: int) -> dict | None:
@@ -186,7 +190,17 @@ class ProjectService:
         )
         project["attention"] = self._derive_attention(project, project["recent_runs"])
         project["attention_severity"] = self._highest_attention_severity(project["attention"])
+        recommendation_state = self._build_workspace_skill_recommendations(project, self._load_skill_definitions())
+        project["workspace_state"] = recommendation_state["workspace_state"]
+        project["next_action"] = recommendation_state["next_action"]
         return project
+
+    def get_project_skill_recommendations(self, project_id: int) -> dict:
+        project = self.get_project(project_id)
+        if project is None:
+            raise ValueError("Project not found")
+        skills = self._load_skill_definitions()
+        return self._build_workspace_skill_recommendations(project, skills)
 
     def create_project(
         self,
@@ -836,6 +850,203 @@ class ProjectService:
             "preferred_agent": preferred_agent,
             "unified_runtime": "shared project record, skill catalog, run queue, logs, and artifacts",
         }
+
+    def _load_skill_definitions(self) -> list[dict]:
+        with self.db.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT name, source, description, supports_codex, supports_openclaw, requires_interaction
+                FROM skill_definitions
+                ORDER BY name
+                """
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def _build_workspace_skill_recommendations(self, project: dict, skills: list[dict]) -> dict:
+        skill_map = {str(item.get("name") or ""): item for item in skills}
+        cwd = str(project.get("primary_local_path") or project.get("runtime_summary", {}).get("project_root") or "").strip()
+        workspace_state = self._workspace_state(project)
+        suggested: list[dict] = []
+
+        def add_suggestion(skill_name: str, reason: str, priority: int, *, preferred_agents: tuple[str, ...] = ("codex", "openclaw")) -> None:
+            item = self._workspace_skill_action(
+                skill_map=skill_map,
+                skill_name=skill_name,
+                cwd=cwd,
+                reason=reason,
+                priority=priority,
+                category="suggested",
+                preferred_agents=preferred_agents,
+            )
+            if item is not None and not any(existing["skill_name"] == item["skill_name"] for existing in suggested):
+                suggested.append(item)
+
+        if workspace_state == "deploy-failed":
+            add_suggestion("investigate", "Latest deployment is failed and needs root-cause analysis before any new action.", 100)
+            add_suggestion("review", "Inspect the current workspace diff for regressions tied to the failed deploy.", 85)
+            add_suggestion("qa", "Re-test the workspace once the deployment issue is understood or fixed.", 70)
+            add_suggestion("canary", "Run post-deploy verification after the failed deployment path is repaired.", 60)
+        elif workspace_state == "risky-release":
+            add_suggestion("canary", "Release health is risky or stale, so production verification is the highest-value next step.", 95)
+            add_suggestion("review", "Review current workspace changes before promoting or trusting the risky release state.", 80)
+            add_suggestion("qa", "Exercise the live workspace flow to validate the release state from a user angle.", 70)
+        elif workspace_state == "dirty-worktree":
+            add_suggestion("review", "There are uncommitted workspace changes after agent activity, so review is the safest next move.", 95)
+            add_suggestion("ship", "The workspace may be ready to ship once the current diff is reviewed.", 85)
+            add_suggestion("qa", "QA is useful after review if the workspace changes are close to ready.", 70)
+        elif workspace_state in {"active-run", "active-session"}:
+            add_suggestion("review", "This workspace already has active agent context, so review is the fastest human-in-the-loop action.", 90)
+            add_suggestion("qa", "QA can validate the active workspace path without losing the current session context.", 70)
+            add_suggestion("plan-eng-review", "If the workspace is moving but feels uncertain, do an engineering review before broader changes.", 55)
+        elif workspace_state == "ready-to-ship":
+            add_suggestion("ship", "The workspace is clean enough to move toward shipping and has deployment context available.", 90)
+            add_suggestion("qa", "Run QA before or alongside shipping to reduce surprise regressions.", 75)
+            add_suggestion("canary", "After ship, verify the deployed workspace health from the same control surface.", 65)
+        elif workspace_state == "needs-review":
+            add_suggestion("review", "The workspace has signals that need human inspection before more execution.", 85)
+            add_suggestion("plan-eng-review", "An engineering review can tighten the execution plan for this workspace.", 70)
+            add_suggestion("qa", "Run QA if the concern is behavioral rather than architectural.", 60)
+        else:
+            add_suggestion("review", "Review is the default high-signal action when the workspace has no obvious blocker.", 60)
+            add_suggestion("office-hours", "Use office hours when this workspace needs direction rather than immediate execution.", 50)
+            add_suggestion("plan-ceo-review", "Use a CEO review when the workspace direction or ambition feels underspecified.", 40)
+
+        suggested.sort(key=lambda item: (-int(item["priority"]), str(item["skill_name"])))
+        common_order = (
+            "investigate",
+            "review",
+            "qa",
+            "ship",
+            "canary",
+            "document-release",
+            "plan-eng-review",
+            "plan-ceo-review",
+            "office-hours",
+        )
+        common = [
+            item
+            for skill_name in common_order
+            for item in [
+                self._workspace_skill_action(
+                    skill_map=skill_map,
+                    skill_name=skill_name,
+                    cwd=cwd,
+                    reason="Common workspace action.",
+                    priority=50,
+                    category="common",
+                )
+            ]
+            if item is not None
+        ]
+        all_skills = [
+            self._workspace_skill_action(
+                skill_map=skill_map,
+                skill_name=str(item.get("name") or ""),
+                cwd=cwd,
+                reason=str(item.get("description") or ""),
+                priority=0,
+                category="all",
+            )
+            for item in skills
+        ]
+        all_skills = [item for item in all_skills if item is not None]
+        top = suggested[0] if suggested else (common[0] if common else None)
+        next_action = None
+        if top is not None:
+            next_action = {
+                "title": self._workspace_skill_title(top["skill_name"]),
+                "summary": top["reason"],
+                "skill_name": top["skill_name"],
+                "agent_type": top["agent_type"],
+                "cwd": top["cwd"],
+            }
+        return {
+            "project_id": int(project["id"]),
+            "workspace_state": workspace_state,
+            "next_action": next_action,
+            "suggested": suggested,
+            "common": common,
+            "all_skills": all_skills,
+        }
+
+    def _workspace_skill_action(
+        self,
+        *,
+        skill_map: dict[str, dict],
+        skill_name: str,
+        cwd: str,
+        reason: str,
+        priority: int,
+        category: str,
+        preferred_agents: tuple[str, ...] = ("codex", "openclaw"),
+    ) -> dict | None:
+        skill = skill_map.get(skill_name)
+        if skill is None:
+            return None
+        agent_type = self._skill_agent_type(skill, preferred_agents=preferred_agents)
+        if not agent_type:
+            return None
+        return {
+            "skill_name": skill_name,
+            "agent_type": agent_type,
+            "cwd": cwd,
+            "reason": reason,
+            "priority": priority,
+            "category": category,
+            "description": str(skill.get("description") or ""),
+            "source": str(skill.get("source") or ""),
+        }
+
+    def _skill_agent_type(self, skill: dict, *, preferred_agents: tuple[str, ...]) -> str:
+        supports = {
+            "codex": bool(skill.get("supports_codex")),
+            "openclaw": bool(skill.get("supports_openclaw")),
+        }
+        for agent_type in preferred_agents:
+            if supports.get(agent_type):
+                return agent_type
+        for agent_type in ("codex", "openclaw"):
+            if supports.get(agent_type):
+                return agent_type
+        return ""
+
+    def _workspace_state(self, project: dict) -> str:
+        deployments = project.get("deployments") or []
+        recent_runs = project.get("recent_runs") or []
+        current_sessions = project.get("current_sessions") or []
+        attention = project.get("attention") or []
+        repo_snapshot = project.get("repo_snapshot") or {}
+        has_dirty_worktree = bool(repo_snapshot.get("has_uncommitted_changes") or project.get("has_uncommitted_changes"))
+
+        if any(str(item.get("state") or "") == "failed" for item in deployments):
+            return "deploy-failed"
+        if any(str(item.get("release_health") or "") == "risky" for item in deployments):
+            return "risky-release"
+        if any(str(item.get("status") or "") in {"queued", "running", "cancelling"} for item in recent_runs):
+            return "active-run"
+        if has_dirty_worktree and any(str(item.get("agent_type") or "") in {"codex", "openclaw"} for item in recent_runs):
+            return "dirty-worktree"
+        if current_sessions:
+            return "active-session"
+        if attention and self._highest_attention_severity(attention) in {"high", "medium"}:
+            return "needs-review"
+        if deployments and not has_dirty_worktree:
+            return "ready-to-ship"
+        return "idle"
+
+    def _workspace_skill_title(self, skill_name: str) -> str:
+        labels = {
+            "canary": "Verify deployed workspace health",
+            "document-release": "Update release documentation",
+            "investigate": "Investigate the current workspace issue",
+            "office-hours": "Rethink workspace direction",
+            "plan-ceo-review": "Run a CEO scope review",
+            "plan-eng-review": "Run an engineering review",
+            "qa": "QA the workspace",
+            "review": "Review the current workspace changes",
+            "ship": "Ship the ready workspace changes",
+        }
+        return labels.get(skill_name, f"Run {skill_name}")
 
     def _refresh_project_metadata(self, conn, project_id: int) -> bool:
         project = conn.execute(

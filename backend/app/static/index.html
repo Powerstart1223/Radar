@@ -627,6 +627,9 @@
     }
 
     function projectFocusLabel(item) {
+      if (item.next_action?.title) {
+        return item.next_action.title;
+      }
       if ((item.current_sessions || []).length) {
         return 'Resume active work';
       }
@@ -1653,8 +1656,18 @@
             </div>
           </div>
           <div class="meta" style="margin-top:10px">${safeText(projectFocusLabel(item))}</div>
+          ${item.next_action ? `
+            <div class="item" style="margin-top:10px">
+              <strong>${safeText(item.next_action.title || 'Next action')}</strong><br>
+              <span class="meta">${safeText(item.next_action.summary || '')}</span>
+              <div class="actions">
+                <button class="btn" onclick='queueWorkspaceSkill(${item.id}, ${JSON.stringify(String(item.next_action.agent_type || ""))}, ${JSON.stringify(String(item.next_action.skill_name || ""))}, ${JSON.stringify(String(item.next_action.cwd || ""))})'>Run Next Action</button>
+              </div>
+            </div>
+          ` : ''}
           <div class="chips">
             <span class="chip">workspace ${safeText(item.status)}</span>
+            <span class="chip">${safeText(item.workspace_state || 'idle')}</span>
             <span class="chip">branch ${safeText(item.branch, 'unknown')}</span>
             ${item.has_uncommitted_changes ? '<span class="chip medium">dirty worktree</span>' : '<span class="chip">clean worktree</span>'}
             ${(item.current_sessions || []).length ? `<span class="chip medium">sessions ${safeText((item.current_sessions || []).length)}</span>` : ''}
@@ -1675,6 +1688,8 @@
       persistSelectedProject(projectId);
       const response = await fetch(`/api/projects/${projectId}`);
       const project = await response.json();
+      const recommendationsResponse = await fetch(`/api/projects/${projectId}/skills/recommended`);
+      const recommendations = await recommendationsResponse.json();
       const aliases = (project.aliases || [])
         .map(alias => `<span class="chip">${safeText(alias.alias_type)}: ${safeText(alias.alias_value)}</span>`)
         .join('');
@@ -1852,7 +1867,10 @@
           ${sessionRows || '<p>No linked Codex or OpenClaw sessions for this project yet.</p>'}
         </div>
         <div class="item">
-          <strong>Task Draft</strong>
+          ${renderWorkspaceSkills(project.id, recommendationsResponse.ok ? recommendations : {})}
+        </div>
+        <div class="item">
+          <strong>Advanced Run</strong>
           <div class="form-row">
             <div>
               <label for="agent-type">Agent</label>
@@ -1912,6 +1930,10 @@
           `).join('') || '<p>No recent agent activity recorded.</p>'}
         </div>
         <div class="item">
+          <strong>Workspace Timeline</strong>
+          ${renderWorkspaceTimeline(project)}
+        </div>
+        <div class="item">
           <strong>Recent Runs</strong>
           ${runRows || '<p>No runs queued for this project yet.</p>'}
         </div>
@@ -1966,11 +1988,134 @@
     }
 
     function buildDefaultCommand(agentType, skillName, cwd) {
-      const prompt = `use gstack ${skillName} in this workspace and improve the highest-value next issue`;
+      const prompts = {
+        'canary': 'use gstack canary in this workspace and verify the deployed app health',
+        'document-release': 'use gstack document-release in this workspace and update the docs to match what just shipped',
+        'investigate': 'use gstack investigate in this workspace and root-cause the highest-severity current problem',
+        'office-hours': 'use gstack office-hours in this workspace and rethink the highest-value product direction',
+        'plan-ceo-review': 'use gstack plan-ceo-review in this workspace and sharpen the product scope and ambition',
+        'plan-design-review': 'use gstack plan-design-review in this workspace and critique the user experience direction',
+        'plan-eng-review': 'use gstack plan-eng-review in this workspace and lock in the engineering plan',
+        'qa': 'use gstack qa in this workspace and find and fix the highest-value defects',
+        'qa-only': 'use gstack qa-only in this workspace and report the highest-value defects without changing code',
+        'review': 'use gstack review in this workspace and review the current diff for bugs and regressions',
+        'ship': 'use gstack ship in this workspace and ship the current ready changes',
+      };
+      const prompt = prompts[String(skillName || '')] || `use gstack ${skillName} in this workspace and improve the highest-value next issue`;
       if (agentType === 'openclaw') {
         return `openclaw --cwd "${cwd}" "${prompt}"`;
       }
       return `codex --cwd "${cwd}" "${prompt}"`;
+    }
+
+    function skillLabel(skillName) {
+      return String(skillName || '')
+        .split('-')
+        .filter(Boolean)
+        .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+        .join(' ');
+    }
+
+    function renderWorkspaceSkillCards(projectId, items, emptyText) {
+      if (!items.length) {
+        return `<p>${safeText(emptyText)}</p>`;
+      }
+      return items.map(item => `
+        <div class="item">
+          <strong>${safeText(skillLabel(item.skill_name))}</strong><br>
+          <span class="meta">${safeText(item.reason || item.description || 'Workspace skill')}</span>
+          <div class="chips">
+            <span class="chip">${safeText(item.agent_type)}</span>
+            ${item.priority ? `<span class="chip">${safeText(item.priority)}</span>` : ''}
+          </div>
+          <div class="actions">
+            <button class="btn" onclick='queueWorkspaceSkill(${projectId}, ${JSON.stringify(String(item.agent_type || ""))}, ${JSON.stringify(String(item.skill_name || ""))}, ${JSON.stringify(String(item.cwd || ""))})'>Run Skill</button>
+            <button class="btn secondary" onclick='previewWorkspaceSkill(${projectId}, ${JSON.stringify(String(item.agent_type || ""))}, ${JSON.stringify(String(item.skill_name || ""))}, ${JSON.stringify(String(item.cwd || ""))})'>Preview Command</button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function renderWorkspaceSkills(projectId, recommendations) {
+      const suggested = recommendations?.suggested || [];
+      const common = recommendations?.common || [];
+      const allSkills = recommendations?.all_skills || [];
+      const nextAction = recommendations?.next_action;
+      const nextActionMarkup = nextAction
+        ? `
+          <div class="item">
+            <strong>${safeText(nextAction.title || 'Next action')}</strong><br>
+            <span class="meta">${safeText(nextAction.summary || '')}</span>
+            <div class="actions">
+              <button class="btn" onclick='queueWorkspaceSkill(${projectId}, ${JSON.stringify(String(nextAction.agent_type || ""))}, ${JSON.stringify(String(nextAction.skill_name || ""))}, ${JSON.stringify(String(nextAction.cwd || ""))})'>Run Next Action</button>
+              <button class="btn secondary" onclick='previewWorkspaceSkill(${projectId}, ${JSON.stringify(String(nextAction.agent_type || ""))}, ${JSON.stringify(String(nextAction.skill_name || ""))}, ${JSON.stringify(String(nextAction.cwd || ""))})'>Preview Command</button>
+            </div>
+          </div>
+        `
+        : '<p>No next action is available yet.</p>';
+      return `
+        <strong>Workspace Skills</strong><br>
+        <span class="meta">Embedded gstack actions for this workspace, ranked by current state.</span>
+        <div class="chips">
+          <span class="chip">state ${safeText(recommendations?.workspace_state || 'unknown')}</span>
+        </div>
+        <div style="margin-top:10px">
+          ${nextActionMarkup}
+        </div>
+        <div style="margin-top:10px">
+          <strong>Suggested Now</strong>
+          ${renderWorkspaceSkillCards(projectId, suggested, 'No suggested skills for this workspace yet.')}
+        </div>
+        <div style="margin-top:10px">
+          <strong>Common Actions</strong>
+          ${renderWorkspaceSkillCards(projectId, common, 'No common workspace actions are available.')}
+        </div>
+        <div style="margin-top:10px">
+          <strong>All Skills</strong>
+          <div class="chips">
+            ${allSkills.map(item => `<button class="btn secondary chip" onclick='previewWorkspaceSkill(${projectId}, ${JSON.stringify(String(item.agent_type || ""))}, ${JSON.stringify(String(item.skill_name || ""))}, ${JSON.stringify(String(item.cwd || ""))})'>${safeText(skillLabel(item.skill_name))}</button>`).join('')}
+          </div>
+        </div>
+      `;
+    }
+
+    function renderWorkspaceTimeline(project) {
+      const timeline = [];
+      (project.recent_events || []).forEach(event => {
+        timeline.push({
+          ts: String(event.occurred_at || ''),
+          title: `${event.source} ${event.event_type}`,
+          detail: event.summary || 'Workspace event',
+        });
+      });
+      (project.recent_runs || []).forEach(run => {
+        timeline.push({
+          ts: String(run.finished_at || run.started_at || ''),
+          title: `${run.agent_type} ${run.skill_name}`,
+          detail: `${run.status} ${run.output_summary || ''}`.trim(),
+        });
+      });
+      (project.deployments || []).forEach(target => {
+        timeline.push({
+          ts: String(target.updated_at || ''),
+          title: `${target.provider} deployment`,
+          detail: `${target.state} ${target.service_name || target.environment || ''}`.trim(),
+        });
+      });
+      const items = timeline
+        .filter(item => item.ts || item.title)
+        .sort((a, b) => String(b.ts || '').localeCompare(String(a.ts || '')))
+        .slice(0, 10);
+      if (!items.length) {
+        return '<p>No workspace timeline entries yet.</p>';
+      }
+      return items.map(item => `
+        <div class="item">
+          <strong>${safeText(item.title)}</strong><br>
+          <span class="meta">${safeText(item.ts || 'unknown time')}</span><br>
+          <span class="meta">${safeText(item.detail || 'No detail')}</span>
+        </div>
+      `).join('');
     }
 
     function syncLaunchCommand() {
@@ -1991,37 +2136,63 @@
       }
     }
 
-    async function queueProjectRun(projectId) {
+    function previewWorkspaceSkill(projectId, agentType, skillName, cwd) {
       const agent = document.getElementById('agent-type');
       const skill = document.getElementById('skill-name');
-      const cwd = document.getElementById('run-cwd');
+      const cwdInput = document.getElementById('run-cwd');
+      if (agent) {
+        agent.value = agentType;
+      }
+      if (skill) {
+        skill.value = skillName;
+      }
+      if (cwdInput) {
+        cwdInput.value = cwd;
+      }
+      syncLaunchCommand();
+      setWorkspaceActionState(projectId, {
+        title: 'Skill loaded into draft',
+        summary: `Prepared ${skillName} for ${agentType} in this workspace.`,
+        severity: 'medium',
+        details: [`agent ${agentType}`, `skill ${skillName}`],
+      });
+    }
+
+    async function queueWorkspaceSkill(projectId, agentType, skillName, cwd) {
       persistAgentFormState(projectId, {
-        agent_type: agent.value,
-        skill_name: skill.value,
-        cwd: cwd.value,
+        agent_type: agentType,
+        skill_name: skillName,
+        cwd,
       });
       const response = await fetch('/api/runs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           project_id: projectId,
-          agent_type: agent.value,
-          skill_name: skill.value,
-          cwd: cwd.value
+          agent_type: agentType,
+          skill_name: skillName,
+          cwd
         })
       });
       const data = await response.json();
       await loadStatus();
       setWorkspaceActionState(projectId, {
-        title: 'Run queued',
+        title: 'Workspace skill queued',
         summary: response.ok
-          ? `Queued ${agent.value} with ${skill.value} in ${cwd.value}.`
-          : (data.detail || 'Unable to queue the workspace run.'),
+          ? `Queued ${skillName} with ${agentType} in ${cwd}.`
+          : (data.detail || 'Unable to queue the workspace skill.'),
         severity: response.ok ? 'medium' : 'high',
         details: response.ok
-          ? [`run ${data.run_id || 'pending'}`, `agent ${agent.value}`, `skill ${skill.value}`]
+          ? [`run ${data.run_id || 'pending'}`, `agent ${agentType}`, `skill ${skillName}`]
           : [],
       });
+    }
+
+    async function queueProjectRun(projectId) {
+      const agent = document.getElementById('agent-type');
+      const skill = document.getElementById('skill-name');
+      const cwd = document.getElementById('run-cwd');
+      await queueWorkspaceSkill(projectId, agent.value, skill.value, cwd.value);
     }
 
     async function refreshProjectRepo(projectId) {
