@@ -689,6 +689,28 @@
       }
     }
 
+    function dashboardRouteState() {
+      try {
+        const params = new URLSearchParams(window.location.search || '');
+        const view = String(params.get('view') || '').trim();
+        const filter = String(params.get('filter') || '').trim();
+        const sync = String(params.get('sync') || '').trim();
+        return { view, filter, sync };
+      } catch (_error) {
+        return { view: '', filter: '', sync: '' };
+      }
+    }
+
+    function resolveOperationsState() {
+      const restored = restoreOperationsState();
+      const route = dashboardRouteState();
+      return {
+        view: route.view || restored.view || 'runs',
+        filter: route.filter || restored.filter || 'all',
+        sync: route.sync || '',
+      };
+    }
+
     function persistSelectedProject(projectId) {
       try {
         if (projectId === null || projectId === undefined || projectId === '') {
@@ -2526,7 +2548,7 @@
       }
     }, 5000);
     restoredSessionState = summarizeRestoredSessionState();
-    const restoredOperations = restoreOperationsState();
+    const restoredOperations = resolveOperationsState();
     const operationsViewSelect = document.getElementById('operations-view');
     if (operationsViewSelect) {
       operationsViewSelect.value = restoredOperations.view || 'runs';
@@ -2544,7 +2566,12 @@
       document.getElementById('operations-filter')?.value || 'all'
     );
     renderSessionRestoreBanner();
-    loadSkills().then(loadStatus);
+    loadSkills().then(async () => {
+      await loadStatus();
+      if (restoredOperations.sync === 'deployments') {
+        await syncDeployments();
+      }
+    });
   </script>
 </body>
 </html>
